@@ -134,12 +134,11 @@ class Command(BaseCommand):
             group_id=-1001234567890,
             group_username='test_crypto_group',
             group_title='Test Crypto Trading Group',
-            description='A test group for cryptocurrency trading discussions',
+            group_description='A test group for cryptocurrency trading discussions',
             price_usd=Decimal('150.00'),
             member_count=5420,
             category='CRYPTO',
-            status='ACTIVE',
-            is_verified_by_bot=True
+            status='ACTIVE'
         )
         
         self.stdout.write(f"Created test group listing: {group_listing.group_title}")

@@ -15,6 +15,7 @@ Key Features:
 import json
 import logging
 from django.http import JsonResponse, HttpResponse
+from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.utils.decorators import method_decorator
@@ -26,10 +27,61 @@ from rest_framework import status
 
 from .payment_service import PaymentService
 from .services import EscrowService
-from .models import EscrowTransaction
+from .models import EscrowTransaction, TelegramUser, DisputeCase, AuditLog
 
 # Set up logging
 logger = logging.getLogger('trustlink.escrow.views')
+
+def escrow_index(request):
+    """
+    Escrow system status page
+    
+    This view provides an overview of the escrow system status,
+    including statistics and available API endpoints.
+    """
+    
+    try:
+        # Get system statistics
+        total_transactions = EscrowTransaction.objects.count()
+        active_transactions = EscrowTransaction.objects.filter(
+            status__in=['PENDING', 'FUNDED', 'AWAITING_TRANSFER', 'VERIFYING']
+        ).count()
+        completed_transactions = EscrowTransaction.objects.filter(status='COMPLETED').count()
+        disputed_transactions = EscrowTransaction.objects.filter(status='DISPUTED').count()
+        total_users = TelegramUser.objects.count()
+        open_disputes = DisputeCase.objects.filter(status='OPEN').count()
+        
+        # Recent activity
+        recent_transactions = EscrowTransaction.objects.select_related(
+            'buyer', 'seller', 'group_listing'
+        ).order_by('-created_at')[:5]
+        
+        context = {
+            'stats': {
+                'total_transactions': total_transactions,
+                'active_transactions': active_transactions,
+                'completed_transactions': completed_transactions,
+                'disputed_transactions': disputed_transactions,
+                'total_users': total_users,
+                'open_disputes': open_disputes,
+            },
+            'recent_transactions': recent_transactions,
+            'api_endpoints': [
+                {'url': '/escrow/api/transactions/', 'method': 'POST', 'description': 'Create new transaction'},
+                {'url': '/escrow/api/transactions/<id>/', 'method': 'GET', 'description': 'Get transaction status'},
+                {'url': '/escrow/api/transactions/<id>/dispute/', 'method': 'POST', 'description': 'Create dispute'},
+                {'url': '/escrow/api/user/transactions/', 'method': 'GET', 'description': 'Get user transactions'},
+                {'url': '/escrow/webhooks/coinbase/', 'method': 'POST', 'description': 'Coinbase Commerce webhook'},
+            ]
+        }
+        
+        return render(request, 'escrow/index.html', context)
+        
+    except Exception as e:
+        logger.error(f"Error in escrow index view: {str(e)}")
+        return render(request, 'escrow/index.html', {
+            'error': 'Unable to load system statistics'
+        })
 
 @csrf_exempt
 @require_http_methods(["POST"])

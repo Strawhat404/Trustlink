@@ -17,6 +17,9 @@ from . import views
 app_name = 'escrow'
 
 urlpatterns = [
+    # Escrow system index page
+    path('', views.escrow_index, name='escrow_index'),
+    
     # Payment webhook endpoint (no authentication required)
     # This endpoint receives notifications from Coinbase Commerce
     path('webhooks/coinbase/', views.coinbase_webhook, name='coinbase_webhook'),

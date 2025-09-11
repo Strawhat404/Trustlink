@@ -23,3 +23,6 @@ urlpatterns = [
     path('groups/', include('groups.urls')),
     path('telegram_bot/', include('telegram_bot.urls')),
 ]
+
+
+
