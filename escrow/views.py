@@ -236,14 +236,70 @@ def create_transaction(request):
     """
     
     try:
-        # TODO: Implement transaction creation
-        # This will be fully implemented when we add the Telegram bot integration
-        
+        # Map authenticated Django user to TelegramUser
+        try:
+            buyer = request.user.telegramuser  # OneToOne on TelegramUser.user
+        except Exception:
+            return Response({"error": "Authenticated user is not linked to a Telegram account"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        seller_telegram_id = request.data.get('seller_telegram_id')
+        group_listing_id = request.data.get('group_listing_id')
+        amount = request.data.get('amount')
+        currency = request.data.get('currency')
+
+        # Validate inputs
+        if not all([seller_telegram_id, group_listing_id, amount, currency]):
+            return Response({"error": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST)
+
+        from decimal import Decimal
+        from groups.models import GroupListing
+
+        try:
+            amount_dec = Decimal(str(amount))
+        except Exception:
+            return Response({"error": "Invalid amount"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            seller = TelegramUser.objects.get(telegram_id=seller_telegram_id)
+        except TelegramUser.DoesNotExist:
+            return Response({"error": "Seller not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            group_listing = GroupListing.objects.get(id=group_listing_id, seller=seller, status='ACTIVE')
+        except GroupListing.DoesNotExist:
+            return Response({"error": "Active group listing not found for seller"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Create escrow transaction
+        txn = EscrowService.create_transaction(
+            buyer=buyer,
+            seller=seller,
+            group_listing=group_listing,
+            amount=amount_dec,
+            currency=currency,
+            usd_equivalent=group_listing.price_usd
+        )
+
+        # Create payment charge
+        ok, charge = PaymentService.create_payment_charge(
+            transaction=txn,
+            redirect_url=request.build_absolute_uri(f"/escrow/api/transactions/{txn.id}/"),
+            cancel_url=request.build_absolute_uri("/escrow/")
+        )
+
+        if not ok:
+            return Response({"error": "Failed to create payment charge", "details": charge.get('error')}, status=status.HTTP_502_BAD_GATEWAY)
+
         return Response({
-            "message": "Transaction creation endpoint - full implementation pending",
-            "data": request.data
-        }, status=status.HTTP_200_OK)
-        
+            "transaction_id": str(txn.id),
+            "status": txn.status,
+            "amount": str(txn.amount),
+            "currency": txn.currency,
+            "payment_url": charge.get("payment_url"),
+            "charge_id": charge.get("charge_id")
+        }, status=status.HTTP_201_CREATED)
+
+    except ValueError as ve:
+        return Response({"error": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
         logger.error(f"Error creating transaction: {str(e)}")
         return Response(
@@ -270,20 +326,31 @@ def dispute_transaction(request, transaction_id):
     try:
         description = request.data.get('description')
         if not description:
-            return Response(
-                {"error": "Description is required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # TODO: Get TelegramUser from authenticated user
-        # TODO: Create dispute using EscrowService.create_dispute()
-        
+            return Response({"error": "Description is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Map authenticated user
+        try:
+            opened_by = request.user.telegramuser
+        except Exception:
+            return Response({"error": "Authenticated user is not linked to a Telegram account"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Create dispute
+        dispute = EscrowService.create_dispute(
+            transaction_id=transaction_id,
+            opened_by=opened_by,
+            description=description
+        )
+
+        if not dispute:
+            return Response({"error": "Failed to create dispute"}, status=status.HTTP_400_BAD_REQUEST)
+
         return Response({
-            "message": "Dispute creation endpoint - full implementation pending",
-            "transaction_id": transaction_id,
-            "description": description
-        }, status=status.HTTP_200_OK)
-        
+            "dispute_id": dispute.id,
+            "status": dispute.status,
+            "opened_by": opened_by.username or str(opened_by.telegram_id),
+            "created_at": dispute.created_at.isoformat()
+        }, status=status.HTTP_201_CREATED)
+
     except Exception as e:
         logger.error(f"Error creating dispute: {str(e)}")
         return Response(

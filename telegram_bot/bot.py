@@ -228,6 +228,34 @@ Need help? Contact our support team anytime!
         """
         
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+
+    async def buy_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /buy command - show active listings to purchase"""
+        try:
+            # Fetch latest active listings
+            listings = list(
+                GroupListing.objects.filter(status='ACTIVE').select_related('seller').order_by('-created_at')[:10]
+            )
+
+            if not listings:
+                await update.message.reply_text("🛍️ No active listings available right now. Please check back later.")
+                return
+
+            # Build keyboard with up to 10 listings
+            keyboard = []
+            for gl in listings:
+                label = f"{gl.group_title[:28]} • ${gl.price_usd}"
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"buy_group_{gl.id}")])
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                "🛍️ **Available Group Listings**\n\nSelect a group to start a secure escrow purchase:",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.error(f"/buy error: {str(e)}")
+            await update.message.reply_text("❌ Failed to load listings. Please try again later.")
     
     async def register_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start the registration process"""
@@ -664,6 +692,135 @@ Use /my_listings to manage your listings anytime!
             await query.edit_message_text("📝 My listings feature coming soon!")
         elif query.data == "transactions":
             await query.edit_message_text("📊 Transaction history feature coming soon!")
+
+    # ===== Transaction conversation handlers =====
+    async def transaction_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start transaction after selecting a group listing"""
+        query = update.callback_query
+        await query.answer()
+
+        try:
+            prefix = "buy_group_"
+            listing_id = query.data[len(prefix):]
+            context.user_data['transaction_listing_id'] = listing_id
+
+            # Confirm listing exists
+            gl = GroupListing.objects.get(id=listing_id, status='ACTIVE')
+
+            # Ask for currency selection
+            keyboard = [
+                [InlineKeyboardButton("USDT", callback_data="currency_USDT")],
+                [InlineKeyboardButton("ETH", callback_data="currency_ETH")],
+                [InlineKeyboardButton("BTC", callback_data="currency_BTC")],
+            ]
+            await query.edit_message_text(
+                f"💳 Purchasing: {gl.group_title}\n\nSelect payment currency:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return TRANSACTION_CURRENCY
+        except GroupListing.DoesNotExist:
+            await query.edit_message_text("❌ Listing is no longer available.")
+            return ConversationHandler.END
+        except Exception as e:
+            logger.error(f"transaction_start error: {str(e)}")
+            await query.edit_message_text("❌ Failed to start transaction.")
+            return ConversationHandler.END
+
+    async def transaction_currency(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle currency selection"""
+        query = update.callback_query
+        await query.answer()
+        try:
+            currency = query.data.replace("currency_", "")
+            context.user_data['transaction_currency'] = currency
+
+            listing_id = context.user_data.get('transaction_listing_id')
+            gl = GroupListing.objects.get(id=listing_id)
+
+            # For now, we use USD amount directly for USDT. For BTC/ETH, a real implementation would convert.
+            amount_display = f"${gl.price_usd} USD" if currency == 'USDT' else f"≈ ${gl.price_usd} USD in {currency}"
+
+            keyboard = [
+                [InlineKeyboardButton("✅ Confirm", callback_data="confirm_transaction")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="cancel_transaction")],
+            ]
+            await query.edit_message_text(
+                f"🧾 Transaction Summary\n\n"
+                f"Group: {gl.group_title}\n"
+                f"Seller: @{gl.seller.username or gl.seller.telegram_id}\n"
+                f"Price: {amount_display}\n"
+                f"Currency: {currency}\n\n"
+                f"Proceed to create escrow and payment link?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return TRANSACTION_CONFIRM
+        except Exception as e:
+            logger.error(f"transaction_currency error: {str(e)}")
+            await query.edit_message_text("❌ Failed to set currency.")
+            return ConversationHandler.END
+
+    async def transaction_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Create escrow and return payment link"""
+        query = update.callback_query
+        await query.answer()
+
+        if query.data == "cancel_transaction":
+            await query.edit_message_text("❌ Transaction cancelled.")
+            return ConversationHandler.END
+
+        try:
+            user = update.effective_user
+            buyer = await self._get_or_create_telegram_user(user)
+
+            listing_id = context.user_data.get('transaction_listing_id')
+            currency = context.user_data.get('transaction_currency', 'USDT')
+            gl = GroupListing.objects.get(id=listing_id)
+
+            # Determine amount: use USD price as amount for USDT; for others, keep USD and mark usd_equivalent.
+            from decimal import Decimal
+            amount = Decimal(gl.price_usd)
+
+            # Create escrow transaction via service layer
+            txn = EscrowService.create_transaction(
+                buyer=buyer,
+                seller=gl.seller,
+                group_listing=gl,
+                amount=amount,
+                currency=currency,
+                usd_equivalent=gl.price_usd
+            )
+
+            # Create charge
+            ok, charge = PaymentService.create_payment_charge(
+                transaction=txn,
+                redirect_url=f"https://t.me/{user.username}" if user.username else None,
+                cancel_url=None
+            )
+
+            if not ok:
+                await query.edit_message_text(
+                    "❌ Failed to create payment link. Please try again later."
+                )
+                return ConversationHandler.END
+
+            payment_url = charge.get('payment_url')
+            await query.edit_message_text(
+                f"✅ Escrow created!\n\n"
+                f"Transaction ID: `{txn.id}`\n"
+                f"Amount: {txn.amount} {txn.currency}\n\n"
+                f"👉 Complete your payment here:\n{payment_url}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+            # Clear context
+            context.user_data.pop('transaction_listing_id', None)
+            context.user_data.pop('transaction_currency', None)
+
+            return ConversationHandler.END
+        except Exception as e:
+            logger.error(f"transaction_confirm error: {str(e)}")
+            await query.edit_message_text("❌ Failed to create transaction.")
+            return ConversationHandler.END
     
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle errors"""
@@ -738,13 +895,21 @@ Use /my_listings to manage your listings anytime!
         except Exception:
             return 0
     
-    def run(self):
-        """Start the bot"""
+    async def run(self):
+        """Start the bot asynchronously"""
         logger.info("Starting Trustlink Telegram Bot...")
-        self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        await self.application.initialize()
+        await self.application.start()
+        await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
 
-def main():
-    """Main function to run the bot"""
+    async def stop(self):
+        """Stop the bot asynchronously"""
+        await self.application.updater.stop()
+        await self.application.stop()
+        await self.application.shutdown()
+
+async def main():
+    """Main async function to run the bot"""
     
     # Get bot token from environment
     bot_token = settings.TELEGRAM_BOT_TOKEN
@@ -755,7 +920,12 @@ def main():
     
     # Create and run bot
     bot = TrustlinkBot(bot_token)
-    bot.run()
+    try:
+        await bot.run()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user.")
+    finally:
+        await bot.stop()
 
 if __name__ == '__main__':
     main()
