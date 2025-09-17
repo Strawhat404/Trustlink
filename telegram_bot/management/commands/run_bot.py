@@ -12,9 +12,8 @@ Usage:
 from django.core.management.base import BaseCommand
 from django.conf import settings
 import logging
-import asyncio
 
-from telegram_bot.bot import TrustlinkBot
+from telegram_bot.bot import main as run_bot_main
 
 logger = logging.getLogger(__name__)
 
@@ -48,32 +47,19 @@ class Command(BaseCommand):
         self.stdout.write("Starting Trustlink Telegram Bot...")
         self.stdout.write(f"Bot token: {bot_token[:10]}...")
         
-        bot = TrustlinkBot(bot_token)
-        
         self.stdout.write(
             self.style.SUCCESS(
-                'Bot started successfully! Press Ctrl+C to stop.'
+                'Starting bot... Press Ctrl+C to stop.'
             )
         )
-        
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If a loop is already running, just run the bot's main coroutine
-                task = loop.create_task(bot.run())
-                # A simple way to keep the command alive
-                while not task.done():
-                    loop.run_until_complete(asyncio.sleep(1))
-            else:
-                # If no loop is running, we can run it until completion
-                asyncio.run(bot.run())
+            run_bot_main(token=bot_token)
         except KeyboardInterrupt:
             self.stdout.write(
                 self.style.WARNING('\nBot stopped by user.')
             )
-            # In a real async environment, you'd call bot.stop() here
         except Exception as e:
             self.stdout.write(
-                self.style.ERROR(f'Bot error: {str(e)}')
+                self.style.ERROR(f'An unexpected error occurred: {str(e)}')
             )
             logger.error(f"Bot startup error: {str(e)}")

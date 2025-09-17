@@ -28,6 +28,7 @@ import logging
 import asyncio
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+from asgiref.sync import sync_to_async
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -45,10 +46,18 @@ import django
 import os
 import sys
 
-# Add Django project to Python path
-sys.path.append('/home/pirate/Documents/Projects/Trustlink/Trustlink')
+# Add Django project to Python path dynamically
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+sys.path.insert(0, project_root)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'trustlink_backend.settings')
-django.setup()
+
+# Setup Django
+try:
+    django.setup()
+except Exception as e:
+    print(f"Django setup failed: {e}")
+    sys.exit(1)
 
 from django.conf import settings
 from escrow.models import TelegramUser, EscrowTransaction
@@ -90,7 +99,8 @@ class TrustlinkBot:
     def __init__(self, token: str):
         """Initialize the bot with the given token"""
         self.token = token
-        self.application = Application.builder().token(token).build()
+        # Set a longer timeout to handle slow network conditions
+        self.application = Application.builder().token(token).pool_timeout(30.0).build()
         self._setup_handlers()
     
     def _setup_handlers(self):
@@ -233,7 +243,7 @@ Need help? Contact our support team anytime!
         """Handle the /buy command - show active listings to purchase"""
         try:
             # Fetch latest active listings
-            listings = list(
+            listings = await sync_to_async(list)(
                 GroupListing.objects.filter(status='ACTIVE').select_related('seller').order_by('-created_at')[:10]
             )
 
@@ -444,6 +454,14 @@ Happy trading! 🚀
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
+
+    async def transactions_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /transactions command (placeholder)"""
+        await update.message.reply_text("📊 Transaction history feature coming soon!")
+
+    async def my_listings_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /my_listings command (placeholder)"""
+        await update.message.reply_text("📝 My listings feature coming soon!")
     
     async def list_group_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start the group listing process"""
@@ -705,7 +723,7 @@ Use /my_listings to manage your listings anytime!
             context.user_data['transaction_listing_id'] = listing_id
 
             # Confirm listing exists
-            gl = GroupListing.objects.get(id=listing_id, status='ACTIVE')
+            gl = await sync_to_async(GroupListing.objects.get)(id=listing_id, status='ACTIVE')
 
             # Ask for currency selection
             keyboard = [
@@ -735,7 +753,7 @@ Use /my_listings to manage your listings anytime!
             context.user_data['transaction_currency'] = currency
 
             listing_id = context.user_data.get('transaction_listing_id')
-            gl = GroupListing.objects.get(id=listing_id)
+            gl = await sync_to_async(GroupListing.objects.get)(id=listing_id)
 
             # For now, we use USD amount directly for USDT. For BTC/ETH, a real implementation would convert.
             amount_display = f"${gl.price_usd} USD" if currency == 'USDT' else f"≈ ${gl.price_usd} USD in {currency}"
@@ -774,14 +792,14 @@ Use /my_listings to manage your listings anytime!
 
             listing_id = context.user_data.get('transaction_listing_id')
             currency = context.user_data.get('transaction_currency', 'USDT')
-            gl = GroupListing.objects.get(id=listing_id)
+            gl = await sync_to_async(GroupListing.objects.get)(id=listing_id)
 
             # Determine amount: use USD price as amount for USDT; for others, keep USD and mark usd_equivalent.
             from decimal import Decimal
             amount = Decimal(gl.price_usd)
 
             # Create escrow transaction via service layer
-            txn = EscrowService.create_transaction(
+            txn = await sync_to_async(EscrowService.create_transaction)(
                 buyer=buyer,
                 seller=gl.seller,
                 group_listing=gl,
@@ -791,7 +809,7 @@ Use /my_listings to manage your listings anytime!
             )
 
             # Create charge
-            ok, charge = PaymentService.create_payment_charge(
+            ok, charge = await sync_to_async(PaymentService.create_payment_charge)(
                 transaction=txn,
                 redirect_url=f"https://t.me/{user.username}" if user.username else None,
                 cancel_url=None
@@ -826,17 +844,18 @@ Use /my_listings to manage your listings anytime!
         """Handle errors"""
         
         logger.error(f"Update {update} caused error {context.error}")
+        logger.error(f"Error details: {str(context.error)}")
         
         if update.effective_message:
-            await update.effective_message.reply_text(
-                "❌ An error occurred. Please try again or contact support if the problem persists."
-            )
+            # Provide more specific error information in development
+            error_msg = f"❌ Error: {str(context.error)[:100]}..."
+            await update.effective_message.reply_text(error_msg)
     
     # Helper methods for database operations
     async def _get_telegram_user(self, telegram_id: int) -> Optional[TelegramUser]:
         """Get TelegramUser by telegram_id"""
         try:
-            return TelegramUser.objects.get(telegram_id=telegram_id)
+            return await sync_to_async(TelegramUser.objects.get)(telegram_id=telegram_id)
         except TelegramUser.DoesNotExist:
             return None
     
@@ -844,88 +863,87 @@ Use /my_listings to manage your listings anytime!
         """Get or create TelegramUser from Telegram user object"""
         from django.contrib.auth.models import User
         
-        telegram_user, created = TelegramUser.objects.get_or_create(
-            telegram_id=user.id,
-            defaults={
-                'user': User.objects.create_user(
-                    username=f'telegram_{user.id}',
-                    email=f'{user.id}@telegram.local'
-                ),
-                'username': user.username,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-            }
-        )
-        return telegram_user
+        @sync_to_async
+        def get_or_create_user():
+            try:
+                # Try to get existing user first
+                telegram_user = TelegramUser.objects.get(telegram_id=user.id)
+                return telegram_user
+            except TelegramUser.DoesNotExist:
+                # Create Django User first
+                django_user = User.objects.create_user(
+                    username=f"telegram_{user.id}",
+                    first_name=user.first_name or "",
+                    last_name=user.last_name or ""
+                )
+                
+                # Then create TelegramUser with the Django User
+                telegram_user = TelegramUser.objects.create(
+                    telegram_id=user.id,
+                    username=user.username,
+                    first_name=user.first_name,
+                    last_name=user.last_name,
+                    is_verified=False,
+                    user=django_user
+                )
+                
+                return telegram_user
+        
+        return await get_or_create_user()
     
     async def _save_telegram_user(self, telegram_user: TelegramUser):
         """Save TelegramUser to database"""
-        telegram_user.save()
+        await sync_to_async(telegram_user.save)()
     
     async def _log_message(self, user_id: int, message_type: str, content: str):
         """Log bot message to database"""
         try:
             telegram_user = await self._get_telegram_user(user_id)
             if telegram_user:
-                BotMessage.objects.create(
+                await sync_to_async(BotMessage.objects.create)(
                     user=telegram_user,
                     message_type=message_type,
                     content=content[:1000]  # Truncate if too long
                 )
         except Exception as e:
-            logger.error(f"Failed to log message: {str(e)}")
+            logger.error(f"Failed to log message: {e}")
     
     async def _get_user_transaction_count(self, user: TelegramUser, role: str) -> int:
         """Get transaction count for user as buyer or seller"""
         try:
             if role == 'buyer':
-                return EscrowTransaction.objects.filter(buyer=user).count()
+                return await sync_to_async(EscrowTransaction.objects.filter(buyer=user).count)()
             else:
-                return EscrowTransaction.objects.filter(seller=user).count()
+                return await sync_to_async(EscrowTransaction.objects.filter(seller=user).count)()
         except Exception:
             return 0
     
     async def _get_user_active_listings_count(self, user: TelegramUser) -> int:
         """Get active listings count for user"""
         try:
-            return GroupListing.objects.filter(
-                seller=user,
-                status='ACTIVE'
-            ).count()
+            return await sync_to_async(
+                GroupListing.objects.filter(seller=user, status='ACTIVE').count
+            )()
         except Exception:
             return 0
     
-    async def run(self):
-        """Start the bot asynchronously"""
-        logger.info("Starting Trustlink Telegram Bot...")
-        await self.application.initialize()
-        await self.application.start()
-        await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
 
-    async def stop(self):
-        """Stop the bot asynchronously"""
-        await self.application.updater.stop()
-        await self.application.stop()
-        await self.application.shutdown()
-
-async def main():
-    """Main async function to run the bot"""
+def main(token: Optional[str] = None):
+    """Main function to run the bot"""
     
-    # Get bot token from environment
-    bot_token = settings.TELEGRAM_BOT_TOKEN
+    # Get bot token from argument or environment
+    bot_token = token or settings.TELEGRAM_BOT_TOKEN
     
     if not bot_token:
         logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
         return
     
-    # Create and run bot
+    # Create bot instance
     bot = TrustlinkBot(bot_token)
-    try:
-        await bot.run()
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user.")
-    finally:
-        await bot.stop()
+    
+    # Run the bot until the user presses Ctrl-C
+    logger.info("Starting bot polling...")
+    bot.application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
