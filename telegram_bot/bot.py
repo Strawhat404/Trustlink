@@ -123,7 +123,10 @@ class TrustlinkBot:
         
         # Registration conversation handler
         registration_handler = ConversationHandler(
-            entry_points=[CommandHandler("register", self.register_start)],
+            entry_points=[
+                CommandHandler("register", self.register_start),
+                CallbackQueryHandler(self.register_start, pattern='^register$')
+            ],
             states={
                 REGISTRATION_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.register_name)],
                 REGISTRATION_CONFIRM: [
@@ -345,20 +348,27 @@ Need help? Contact our support team anytime!"""
             await update.message.reply_text("An unexpected error occurred. Please try again.")
     
     async def register_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Start the registration process"""
+        """Start the registration process, handles both command and callback query"""
         
+        query = update.callback_query
+        if query:
+            await query.answer()
+
         user = update.effective_user
         
+        # Determine how to send the message
+        reply_func = query.edit_message_text if query else update.message.reply_text
+
         # Check if already registered
         telegram_user = await self._get_telegram_user(user.id)
         if telegram_user and telegram_user.is_verified:
-            await update.message.reply_text(
+            await reply_func(
                 "✅ You're already registered and verified!\n\n"
                 "Use /profile to view your information or /help to see available commands."
             )
             return ConversationHandler.END
         
-        await update.message.reply_text(
+        await reply_func(
             "📝 **User Registration**\n\n"
             "To get started with Trustlink, I need to collect some basic information.\n\n"
             "Please enter your full name (this will be used for verification purposes):",
@@ -776,9 +786,7 @@ Use /my_listings to manage your listings anytime!
         query = update.callback_query
         await query.answer()
         
-        if query.data == "register":
-            await self.register_start(update, context)
-        elif query.data == "help":
+        if query.data == "help":
             await self.help_command(update, context)
         elif query.data == "profile":
             await self.profile_command(update, context)
@@ -915,49 +923,32 @@ Use /my_listings to manage your listings anytime!
             context.user_data.pop('transaction_currency', None)
 
             return ConversationHandler.END
-        except Exception as e:
-            logger.error(f"transaction_confirm error: {str(e)}")
-            await query.edit_message_text("❌ Failed to create transaction.")
-            return ConversationHandler.END
-    
-    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle errors"""
-        
-        logger.error(f"Update {update} caused error {context.error}")
-        logger.error(f"Error details: {str(context.error)}")
-        
-        if update.effective_message:
-            # Provide more specific error information in development
-            error_msg = f"❌ Error: {str(context.error)[:100]}..."
-            await update.effective_message.reply_text(error_msg)
-    
+
+        payment_url = charge.get('payment_url')
+        await query.edit_message_text(
+            f"✅ Escrow created!\n\n"
+            f"Transaction ID: `{txn.id}`\n"
+            f"Amount: {txn.amount} {txn.currency}\n\n"
+            f"👉 Complete your payment here:\n{payment_url}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Log the error and send a telegram message to notify the user."""
+        logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
+
+        # Don't try to send a message if the update is None (can happen with some network errors)
+        if update and hasattr(update, 'effective_message') and update.effective_message:
+            await update.effective_message.reply_text(
+                "❌ An unexpected error occurred. Please try again or contact support if the problem persists."
+            )
+
     # Helper methods for database operations
-    async def _get_telegram_user(self, telegram_id: int) -> Optional[TelegramUser]:
+    @staticmethod
+    @sync_to_async
+    def _get_telegram_user(telegram_id: int) -> Optional[TelegramUser]:
         """Get TelegramUser by telegram_id"""
-        try:
-            return await sync_to_async(TelegramUser.objects.get)(telegram_id=telegram_id)
-        except TelegramUser.DoesNotExist:
-            return None
-    
-    async def _get_or_create_telegram_user(self, user) -> TelegramUser:
-        """Get or create TelegramUser from Telegram user object"""
-        from django.contrib.auth.models import User
-        
-        @sync_to_async
-        def get_or_create_user():
-            try:
-                # Try to get existing user first
-                telegram_user = TelegramUser.objects.get(telegram_id=user.id)
-                return telegram_user
-            except TelegramUser.DoesNotExist:
-                # Create Django User first
-                django_user = User.objects.create_user(
-                    username=f"telegram_{user.id}",
-                    first_name=user.first_name or "",
-                    last_name=user.last_name or ""
-                )
-                
-                # Then create TelegramUser with the Django User
                 telegram_user = TelegramUser.objects.create(
                     telegram_id=user.id,
                     username=user.username,

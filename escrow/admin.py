@@ -6,19 +6,20 @@ from django import forms
 from django.shortcuts import render
 from django.http import HttpResponseRedirect
 from .dispute_service import DisputeResolutionService
+from .models import (
+    TelegramUser,
+    EscrowTransaction,
+    PaymentWebhook,
+    DisputeCase,
+    AuditLog
+)
+
 
 # Custom form for the resolve_dispute admin action
 class ResolveDisputeForm(forms.Form):
     ruling = forms.ChoiceField(choices=DisputeCase.RULING_CHOICES, required=True)
     resolution_notes = forms.CharField(widget=forms.Textarea, required=True)
 
-from .models import (
-    TelegramUser, 
-    EscrowTransaction, 
-    PaymentWebhook, 
-    DisputeCase, 
-    AuditLog
-)
 
 # =============================================================================
 # TELEGRAM USER ADMIN
