@@ -41,6 +41,7 @@ from telegram.ext import (
     ContextTypes
 )
 from telegram.constants import ParseMode
+from telegram.helpers import escape_markdown
 
 import django
 import os
@@ -171,25 +172,22 @@ class TrustlinkBot:
         # Check if user is already registered
         telegram_user = await self._get_or_create_telegram_user(user)
         
-        welcome_message = f"""
-🔒 **Welcome to Trustlink!**
+        welcome_message = f"""🎉 *Welcome to Trustlink!* 🎉
 
-Hello {user.first_name}! I'm your secure escrow bot for Telegram group transactions.
+Hi {user.first_name}! I'm your secure escrow bot for safe Telegram group transactions.
 
-**What I can help you with:**
-• 🛡️ Secure escrow for group purchases
-• 💰 Cryptocurrency payments (USDT, ETH, BTC)
-• 🔍 Group verification and ownership transfer
-• ⚖️ Dispute resolution and arbitration
+*What I can help you with:*
+🛡️ Secure escrow transactions
+💰 Buy/sell Telegram groups safely  
+📊 Track your transaction history
+🔐 Dispute resolution support
 
-**Quick Start:**
-• Use /register to complete your profile
-• Use /help to see all available commands
-• Use /list_group to sell a group
-• Use /buy to browse available groups
+*Getting Started:*
+1️⃣ Register your account with /register
+2️⃣ Browse groups with /buy
+3️⃣ List your own groups with /list_group
 
-Your safety is our priority! All transactions are secured with smart escrow contracts.
-        """
+Need help? Use /help anytime!"""
         
         keyboard = [
             [InlineKeyboardButton("📝 Register", callback_data="register")],
@@ -207,35 +205,37 @@ Your safety is our priority! All transactions are secured with smart escrow cont
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /help command"""
         
-        help_text = """
-🤖 **Trustlink Bot Commands**
+        help_text = """📚 *Trustlink Help Guide*
 
-**👤 User Management:**
-/start - Welcome message and quick actions
-/register - Complete your user registration
-/profile - View your profile and statistics
+*Available Commands:*
+• /start - Welcome message and main menu
+• /help - Show this help message
+• /register - Register as a new user
+• /profile - View your profile and stats
+• /list_group - Create a new group listing
+• /buy - Browse and purchase groups
+• /transactions - View transaction history
+• /cancel - Cancel current operation
 
-**🏪 Group Trading:**
-/list_group - Create a new group listing for sale
-/my_listings - View and manage your group listings
-/buy - Browse available groups for purchase
+*How Escrow Works:*
+1️⃣ Buyer initiates purchase through bot
+2️⃣ Funds are held securely in escrow
+3️⃣ Seller transfers group ownership
+4️⃣ Buyer confirms receipt
+5️⃣ Funds are released to seller
 
-**💰 Transactions:**
-/transactions - View your transaction history
-/dispute <transaction_id> - Open a dispute
+*Security Features:*
+🔐 Secure payment processing via Coinbase Commerce
+🛡️ Dispute resolution system
+📊 Transaction tracking and history
+✅ User verification system
 
-**ℹ️ Information:**
-/help - Show this help message
-/cancel - Cancel current operation
+*Supported Cryptocurrencies:*
+• USDT (Tether)
+• ETH (Ethereum)  
+• BTC (Bitcoin)
 
-**🔒 Security Features:**
-• All payments held in secure escrow
-• Automated group ownership verification
-• 24/7 dispute resolution support
-• Multi-signature transaction approval
-
-Need help? Contact our support team anytime!
-        """
+Need help? Contact our support team anytime!"""
         
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -424,23 +424,26 @@ Happy trading! 🚀
         total_sales = await self._get_user_transaction_count(telegram_user, 'seller')
         active_listings = await self._get_user_active_listings_count(telegram_user)
         
-        profile_text = f"""
-👤 **Your Profile**
+        # Escape special characters for Markdown V2
+        first_name = escape_markdown(telegram_user.first_name or "", version=2)
+        last_name = escape_markdown(telegram_user.last_name or "", version=2)
+        username = escape_markdown(telegram_user.username or "Not set", version=2)
+        
+        profile_text = f"""👤 *Your Profile*
 
-**Basic Information:**
-• Name: {telegram_user.first_name} {telegram_user.last_name or ''}
-• Username: @{telegram_user.username or 'Not set'}
+*Basic Information:*
+• Name: {first_name} {last_name}
+• Username: @{username}
 • Status: {'✅ Verified' if telegram_user.is_verified else '❌ Not verified'}
 • Member Since: {telegram_user.created_at.strftime('%B %Y')}
 
-**Trading Statistics:**
+*Trading Statistics:*
 • Total Purchases: {total_purchases}
 • Total Sales: {total_sales}
 • Active Listings: {active_listings}
 • User ID: `{telegram_user.telegram_id}`
 
-**Account Actions:**
-        """
+*Account Actions:*"""
         
         keyboard = [
             [InlineKeyboardButton("📊 Transaction History", callback_data="transactions")],
