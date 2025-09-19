@@ -66,6 +66,9 @@ from groups.models import GroupListing
 from escrow.services import EscrowService
 from escrow.payment_service import PaymentService
 from telegram_bot.models import BotSession, BotMessage
+import httpx
+
+API_BASE_URL = "http://127.0.0.1:8000/api"
 
 # Set up logging
 logging.basicConfig(
@@ -114,6 +117,8 @@ class TrustlinkBot:
         self.application.add_handler(CommandHandler("transactions", self.transactions_command))
         self.application.add_handler(CommandHandler("my_listings", self.my_listings_command))
         self.application.add_handler(CommandHandler("buy", self.buy_command))
+        self.application.add_handler(CommandHandler("browse", self.browse_command))
+        self.application.add_handler(CommandHandler("view", self.view_command))
         self.application.add_handler(CommandHandler("cancel", self.cancel_command))
         
         # Registration conversation handler
@@ -267,6 +272,77 @@ Need help? Contact our support team anytime!"""
         except Exception as e:
             logger.error(f"/buy error: {str(e)}")
             await update.message.reply_text("❌ Failed to load listings. Please try again later.")
+
+    async def browse_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /browse command to show marketplace listings."""
+        await update.message.reply_text("🔎 Searching for the latest group listings...")
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{API_BASE_URL}/groups/listings/")
+                response.raise_for_status()
+                listings = response.json()
+
+            if not listings:
+                await update.message.reply_text("🛍️ No active listings available right now. Please check back later.")
+                return
+
+            message = "*🔥 Top Group Listings*\n\n"
+            for listing in listings[:10]: # Show top 10
+                message += f"- *{escape_markdown(listing['group_title'], version=2)}*\n"
+                message += f"  Member Count: {listing['member_count']}\n"
+                message += f"  Price: ${listing['price_usd']}\n"
+                message += f"  To view details, use: `/view {listing['id']}`\n\n"
+            
+            await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN_V2)
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error while browsing listings: {e}")
+            await update.message.reply_text("Sorry, there was an error connecting to the marketplace. Please try again later.")
+        except Exception as e:
+            logger.error(f"Error in /browse command: {e}")
+            await update.message.reply_text("An unexpected error occurred. Please try again.")
+
+    async def view_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /view <id> command to show listing details."""
+        if not context.args:
+            await update.message.reply_text("Please provide a listing ID. Usage: `/view <listing_id>`")
+            return
+
+        listing_id = context.args[0]
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{API_BASE_URL}/groups/listings/{listing_id}/")
+                response.raise_for_status()
+                listing = response.json()
+
+            seller_username = escape_markdown(listing['seller']['username'] or 'N/A', version=2)
+            title = escape_markdown(listing['group_title'], version=2)
+            description = escape_markdown(listing['group_description'], version=2)
+
+            message = f"*📄 Listing Details: {title}*\n\n"
+            message += f"*Description:*\n{description}\n\n"
+            message += f"*Seller:* @{seller_username}\n"
+            message += f"*Price:* ${listing['price_usd']}\n"
+            message += f"*Members:* {listing['member_count']}\n"
+            message += f"*Category:* {listing['category']}\n\n"
+            message += f"To purchase this group, use the button below."
+
+            keyboard = [[InlineKeyboardButton(f"🛒 Buy for ${listing['price_usd']}", callback_data=f"buy_group_{listing['id']}")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup)
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                await update.message.reply_text("Sorry, I couldn't find a listing with that ID.")
+            else:
+                logger.error(f"API error while viewing listing {listing_id}: {e}")
+                await update.message.reply_text("Sorry, there was an error retrieving the listing details.")
+        except Exception as e:
+            logger.error(f"Error in /view command for ID {listing_id}: {e}")
+            await update.message.reply_text("An unexpected error occurred. Please try again.")
     
     async def register_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start the registration process"""

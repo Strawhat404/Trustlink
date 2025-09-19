@@ -1,0 +1,30 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+    <form action="" method="post">
+        {% csrf_token %}
+        <h2>{{ title }}</h2>
+        <p>You are about to apply a ruling to the following dispute(s):</p>
+        <ul>
+            {% for obj in queryset %}
+            <li><a href="{% url 'admin:escrow_disputecase_change' obj.pk %}">Dispute #{{ obj.id }}</a> for Transaction {{ obj.transaction.id|stringformat:".8s" }}...</li>
+            {% endfor %}
+        </ul>
+
+        <fieldset class="module aligned">
+            <div class="form-row">
+                {{ form.ruling.label_tag }} {{ form.ruling }}
+            </div>
+            <div class="form-row">
+                {{ form.resolution_notes.label_tag }} {{ form.resolution_notes }}
+            </div>
+        </fieldset>
+
+        <div>
+            <input type="hidden" name="action" value="resolve_disputes">
+            <input type="submit" name="apply" value="Apply Ruling">
+        </div>
+    </form>
+</div>
+{% endblock %}

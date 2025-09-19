@@ -2,6 +2,16 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils import timezone
+from django import forms
+from django.shortcuts import render
+from django.http import HttpResponseRedirect
+from .dispute_service import DisputeResolutionService
+
+# Custom form for the resolve_dispute admin action
+class ResolveDisputeForm(forms.Form):
+    ruling = forms.ChoiceField(choices=DisputeCase.RULING_CHOICES, required=True)
+    resolution_notes = forms.CharField(widget=forms.Textarea, required=True)
+
 from .models import (
     TelegramUser, 
     EscrowTransaction, 
@@ -330,102 +340,124 @@ class PaymentWebhookAdmin(admin.ModelAdmin):
 @admin.register(DisputeCase)
 class DisputeCaseAdmin(admin.ModelAdmin):
     """
-    Admin interface for managing dispute cases
-    Critical for handling conflicts between buyers and sellers
+    Admin interface for managing dispute cases with a full arbitration workflow.
     """
     
-    list_display = [
-        'id',
+    list_display = (
         'transaction_link',
-        'opened_by_link',
         'status_colored',
+        'ruling_colored',
+        'arbitrator',
+        'opened_by_link',
         'created_at',
         'days_open'
-    ]
+    )
     
-    list_filter = [
-        'status',
-        'created_at',
-        'resolved_at'
-    ]
+    list_filter = ('status', 'ruling', 'arbitrator', 'created_at')
+    search_fields = ('transaction__id', 'opened_by__username', 'arbitrator__username', 'description')
     
-    search_fields = [
-        'transaction__id',
-        'opened_by__username',
-        'description'
-    ]
-    
-    readonly_fields = [
-        'transaction',
-        'opened_by',
-        'created_at',
-        'resolved_at',
-        'days_open'
-    ]
+    readonly_fields = ('transaction', 'opened_by', 'created_at', 'resolved_at', 'days_open')
     
     fieldsets = (
-        ('Dispute Information', {
-            'fields': ('transaction', 'opened_by', 'status')
+        ('Case Information', {
+            'fields': ('transaction', 'opened_by', 'status', 'created_at', 'days_open')
         }),
-        ('Details', {
-            'fields': ('description', 'resolution_notes')
+        ('Arbitration', {
+            'fields': ('arbitrator', 'description', 'evidence')
         }),
-        ('Resolution', {
-            'fields': ('resolved_by', 'resolved_at'),
-            'classes': ('collapse',)
-        }),
-        ('Timeline', {
-            'fields': ('created_at', 'days_open'),
-            'classes': ('collapse',)
+        ('Resolution & Ruling', {
+            'fields': ('ruling', 'resolution_notes', 'resolved_by', 'resolved_at')
         }),
     )
     
+    actions = ['assign_to_self', 'mark_as_investigating', 'resolve_disputes']
+
     def transaction_link(self, obj):
-        """
-        Link to the disputed transaction
-        """
         url = reverse('admin:escrow_escrowtransaction_change', args=[obj.transaction.id])
         return format_html('<a href="{}">{}</a>', url, str(obj.transaction.id)[:8] + "...")
     transaction_link.short_description = "Transaction"
-    
+
     def opened_by_link(self, obj):
-        """
-        Link to user who opened the dispute
-        """
         url = reverse('admin:escrow_telegramuser_change', args=[obj.opened_by.id])
         return format_html('<a href="{}">{}</a>', url, obj.opened_by.username or obj.opened_by.telegram_id)
     opened_by_link.short_description = "Opened By"
-    
+
     def status_colored(self, obj):
-        """
-        Color-coded status display
-        """
         colors = {
             'OPEN': 'red',
             'INVESTIGATING': 'orange',
-            'RESOLVED_SELLER': 'green',
-            'RESOLVED_BUYER': 'blue',
+            'AWAITING_RULING': 'purple',
+            'RESOLVED': 'green',
             'CLOSED': 'gray'
         }
         color = colors.get(obj.status, 'black')
-        return format_html(
-            '<span style="color: {}; font-weight: bold;">{}</span>',
-            color,
-            obj.get_status_display()
-        )
+        return format_html('<span style="color: {};">{}</span>', color, obj.get_status_display())
     status_colored.short_description = "Status"
-    
+
+    def ruling_colored(self, obj):
+        if not obj.ruling:
+            return "-"
+        colors = {
+            'FAVOR_SELLER': 'green',
+            'FAVOR_BUYER': 'blue',
+            'PARTIAL_REFUND': 'orange',
+            'NO_ACTION': 'gray'
+        }
+        color = colors.get(obj.ruling, 'black')
+        return format_html('<span style="color: {};">{}</span>', color, obj.get_ruling_display())
+    ruling_colored.short_description = "Ruling"
+
     def days_open(self, obj):
-        """
-        Calculate how long dispute has been open
-        """
         if obj.resolved_at:
             delta = obj.resolved_at - obj.created_at
             return f"Resolved in {delta.days} days"
-        else:
-            delta = timezone.now() - obj.created_at
-            return f"Open for {delta.days} days"
+        delta = timezone.now() - obj.created_at
+        return f"Open for {delta.days} days"
     days_open.short_description = "Duration"
+
+    # Admin Actions
+    def assign_to_self(self, request, queryset):
+        updated = queryset.update(arbitrator=request.user, status='INVESTIGATING')
+        self.message_user(request, f'{updated} disputes assigned to you and marked as investigating.')
+    assign_to_self.short_description = "Assign selected disputes to myself"
+
+    def mark_as_investigating(self, request, queryset):
+        updated = queryset.update(status='INVESTIGATING')
+        self.message_user(request, f'{updated} disputes marked as investigating.')
+    mark_as_investigating.short_description = "Mark selected as Investigating"
+
+    def resolve_disputes(self, request, queryset):
+        """
+        Admin action to resolve one or more disputes with a ruling.
+        """
+        form = ResolveDisputeForm(request.POST or None)
+
+        if 'apply' in request.POST and form.is_valid():
+            ruling = form.cleaned_data['ruling']
+            notes = form.cleaned_data['resolution_notes']
+            
+            resolved_count = 0
+            for dispute in queryset:
+                success = DisputeResolutionService.resolve_dispute(
+                    dispute=dispute,
+                    ruling=ruling,
+                    resolved_by=request.user,
+                    notes=notes
+                )
+                if success:
+                    resolved_count += 1
+            
+            self.message_user(request, f'{resolved_count} disputes have been resolved.')
+            return HttpResponseRedirect(request.get_full_path())
+
+        context = {
+            'queryset': queryset,
+            'form': form,
+            'title': 'Resolve Disputes',
+            'opts': self.model._meta,
+        }
+        return render(request, 'admin/resolve_disputes.html', context)
+    resolve_disputes.short_description = "Resolve selected disputes"
 
 # =============================================================================
 # AUDIT LOG ADMIN

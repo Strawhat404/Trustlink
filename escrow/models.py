@@ -81,28 +81,42 @@ class PaymentWebhook(models.Model):
         return f"Webhook for {self.transaction.id}"
 
 class DisputeCase(models.Model):
-    """Handle dispute cases"""
-    
+    """Handle dispute cases with a formal arbitration process"""
+
     STATUS_CHOICES = [
         ('OPEN', 'Open'),
         ('INVESTIGATING', 'Under Investigation'),
-        ('RESOLVED_SELLER', 'Resolved - Favor Seller'),
-        ('RESOLVED_BUYER', 'Resolved - Favor Buyer'),
+        ('AWAITING_RULING', 'Awaiting Ruling'),
+        ('RESOLVED', 'Resolved'),
         ('CLOSED', 'Closed'),
     ]
-    
-    transaction = models.OneToOneField(EscrowTransaction, on_delete=models.CASCADE)
+
+    RULING_CHOICES = [
+        ('FAVOR_SELLER', 'Favor Seller - Release Funds'),
+        ('FAVOR_BUYER', 'Favor Buyer - Refund'),
+        ('PARTIAL_REFUND', 'Partial Refund'),
+        ('NO_ACTION', 'No Action'),
+    ]
+
+    transaction = models.OneToOneField(EscrowTransaction, on_delete=models.CASCADE, related_name='dispute_case')
     opened_by = models.ForeignKey(TelegramUser, on_delete=models.CASCADE)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='OPEN')
     description = models.TextField()
+
+    # Arbitration fields
+    arbitrator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='arbitrated_cases')
+    evidence = models.JSONField(default=dict, blank=True, help_text="Links to screenshots, message IDs, etc.")
+
+    # Resolution fields
+    ruling = models.CharField(max_length=20, choices=RULING_CHOICES, null=True, blank=True)
     resolution_notes = models.TextField(blank=True)
     resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_disputes')
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
-    
+
     def __str__(self):
-        return f"Dispute {self.id} - {self.status}"
+        return f"Dispute {self.id} for Txn {self.transaction_id} - {self.status}"
 
 class AuditLog(models.Model):
     """Comprehensive audit logging"""

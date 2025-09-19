@@ -1,19 +1,15 @@
 """
 Groups URL Configuration
 
-This module defines URL patterns for the groups app.
-Currently contains placeholder patterns - will be expanded
-when group management features are implemented.
+This module defines the API URL patterns for the groups app, specifically for the marketplace listings.
 """
 
 from django.urls import path
-from . import views
+from .views import GroupListingListView, GroupListingDetailView
 
-# Define the app namespace for URL reversing
 app_name = 'groups'
 
 urlpatterns = [
-    # Placeholder patterns - to be implemented in future phases
-    # path('api/listings/', views.group_listings, name='group_listings'),
-    # path('api/listings/<uuid:listing_id>/', views.group_detail, name='group_detail'),
+    path('listings/', GroupListingListView.as_view(), name='group-listing-list'),
+    path('listings/<uuid:id>/', GroupListingDetailView.as_view(), name='group-listing-detail'),
 ]

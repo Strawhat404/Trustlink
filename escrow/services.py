@@ -29,6 +29,8 @@ from .models import (
     AuditLog
 )
 from groups.models import GroupListing
+from groups.verification_service import GroupVerificationService
+from asgiref.sync import async_to_sync
 
 # Set up logging for this service
 logger = logging.getLogger('trustlink.escrow')
@@ -186,10 +188,28 @@ class EscrowService:
                 )
                 
                 logger.info(f"Payment processed for transaction {transaction_id}")
-                
-                # TODO: Trigger notification to seller that payment is received
-                # This will be implemented when we add the notification system
-                
+
+                # --- Automated Verification Step ---
+                verification_service = GroupVerificationService()
+                verification_result = async_to_sync(verification_service.perform_full_verification)(
+                    listing=escrow_transaction.group_listing, 
+                    transaction=escrow_transaction
+                )
+
+                if verification_result.result != 'PASSED':
+                    logger.error(f"Post-payment verification failed for transaction {transaction_id}. Reasons: {verification_result.failure_reasons}")
+                    escrow_transaction.status = 'DISPUTED' # Or a new 'VERIFICATION_FAILED' status
+                    escrow_transaction.notes = f"Automated verification failed: {', '.join(verification_result.failure_reasons)}"
+                    escrow_transaction.save()
+                    # TODO: Notify admin and users
+                    return False # Stop the process here
+
+                logger.info(f"Post-payment verification PASSED for transaction {transaction_id}")
+                # --- End Verification Step ---
+
+                # If verification passes, proceed to start the transfer process.
+                self.start_transfer_process(transaction_id=escrow_transaction.id)
+
                 return True
                 
         except EscrowTransaction.DoesNotExist:

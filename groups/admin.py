@@ -3,10 +3,12 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils import timezone
 from .models import (
-    GroupListing,
-    GroupMetadataSnapshot,
-    GroupTransferLog,
-    GroupVerificationResult
+    GroupListing, 
+    GroupMetadataSnapshot, 
+    GroupTransferLog, 
+    GroupVerificationResult,
+    GroupStateLog,
+    AdminChangeLog
 )
 
 # =============================================================================
@@ -477,3 +479,48 @@ class GroupVerificationResultAdmin(admin.ModelAdmin):
             return len(obj.failure_reasons)
         return 0
     failure_count.short_description = "Failures"
+
+# =============================================================================
+# GROUP MONITORING LOGS ADMIN
+# =============================================================================
+
+@admin.register(GroupStateLog)
+class GroupStateLogAdmin(admin.ModelAdmin):
+    """
+    Admin interface for group state logs.
+    Provides a historical view of a group's state over time.
+    """
+    list_display = ('listing_link', 'timestamp', 'member_count', 'title')
+    list_filter = ('listing__group_title', 'timestamp')
+    search_fields = ('listing__group_title', 'title')
+    ordering = ('-timestamp',)
+    
+    def listing_link(self, obj):
+        url = reverse('admin:groups_grouplisting_change', args=[obj.listing.id])
+        return format_html('<a href="{}">{}</a>', url, obj.listing.group_title)
+    listing_link.short_description = "Group Listing"
+
+@admin.register(AdminChangeLog)
+class AdminChangeLogAdmin(admin.ModelAdmin):
+    """
+    Admin interface for group admin change logs.
+    Tracks additions and removals of administrators for security auditing.
+    """
+    list_display = ('listing_link', 'timestamp', 'admin_username', 'action_colored', 'performed_by_user_id')
+    list_filter = ('action', 'listing__group_title', 'timestamp')
+    search_fields = ('listing__group_title', 'admin_username')
+    ordering = ('-timestamp',)
+
+    def listing_link(self, obj):
+        url = reverse('admin:groups_grouplisting_change', args=[obj.listing.id])
+        return format_html('<a href="{}">{}</a>', url, obj.listing.group_title)
+    listing_link.short_description = "Group Listing"
+
+    def action_colored(self, obj):
+        color = 'green' if obj.action == 'added' else 'red'
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            color,
+            obj.get_action_display()
+        )
+    action_colored.short_description = "Action"
