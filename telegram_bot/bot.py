@@ -172,9 +172,10 @@ class TrustlinkBot:
         # Check if user is already registered
         telegram_user = await self._get_or_create_telegram_user(user)
         
+        first_name = escape_markdown(user.first_name or "User", version=2)
         welcome_message = f"""🎉 *Welcome to Trustlink!* 🎉
 
-Hi {user.first_name}! I'm your secure escrow bot for safe Telegram group transactions.
+Hi {first_name}! I'm your secure escrow bot for safe Telegram group transactions.
 
 *What I can help you with:*
 🛡️ Secure escrow transactions
@@ -183,11 +184,11 @@ Hi {user.first_name}! I'm your secure escrow bot for safe Telegram group transac
 🔐 Dispute resolution support
 
 *Getting Started:*
-1️⃣ Register your account with /register
-2️⃣ Browse groups with /buy
-3️⃣ List your own groups with /list_group
+1️⃣ Register your account with `/register`
+2️⃣ Browse groups with `/buy`
+3️⃣ List your own groups with `/list_group`
 
-Need help? Use /help anytime!"""
+Need help? Use `/help` anytime!"""
         
         keyboard = [
             [InlineKeyboardButton("📝 Register", callback_data="register")],
