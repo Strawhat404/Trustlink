@@ -23,6 +23,7 @@ from django.utils import timezone
 
 from .models import EscrowTransaction, PaymentWebhook
 from .services import EscrowService
+from telegram_bot.notification_service import NotificationService
 
 # Set up logging for payment service
 logger = logging.getLogger('trustlink.payments')
@@ -282,8 +283,12 @@ class PaymentService:
                     webhook.processed = True
                     webhook.save()
                 
-                # TODO: Send notification to seller that payment is received
-                # TODO: Start the transfer process automatically
+                # Send notifications to buyer and seller
+                buyer_message = f"✅ Payment confirmed for transaction `{transaction.id}`. The seller has been notified to transfer ownership."
+                seller_message = f"💰 Payment received for transaction `{transaction.id}`. Please transfer ownership of the group to the buyer."
+                
+                NotificationService.send_message(transaction.buyer.telegram_id, buyer_message)
+                NotificationService.send_message(transaction.seller.telegram_id, seller_message)
                 
             return success
             
@@ -305,9 +310,9 @@ class PaymentService:
             # If transaction is still pending, we can leave it as is
             # The user can try to pay again or the transaction will expire
             if transaction.status == 'PENDING':
-                # TODO: Send notification to buyer about payment failure
-                # TODO: Optionally extend payment deadline
-                pass
+                # Send notification to buyer about payment failure
+                buyer_message = f"❌ Payment failed for transaction `{transaction.id}`. Please try again or contact support if the problem persists."
+                NotificationService.send_message(transaction.buyer.telegram_id, buyer_message)
             
             return True
             
@@ -326,8 +331,9 @@ class PaymentService:
         try:
             logger.info(f"Payment delayed for transaction {transaction.id}")
             
-            # TODO: Send notification to buyer that payment is being processed
-            # TODO: Update transaction with pending payment status
+            # Send notification to buyer that payment is being processed
+            buyer_message = f"⏳ Your payment for transaction `{transaction.id}` is delayed. This can happen with some cryptocurrencies. We will notify you once it's confirmed."
+            NotificationService.send_message(transaction.buyer.telegram_id, buyer_message)
             
             return True
             
@@ -346,8 +352,10 @@ class PaymentService:
         try:
             logger.info(f"Payment pending for transaction {transaction.id}")
             
-            # TODO: Send notification to buyer that payment is detected
-            
+            # Send notification to buyer that payment is detected
+            buyer_message = f"👀 Your payment for transaction `{transaction.id}` has been detected and is now pending confirmation."
+            NotificationService.send_message(transaction.buyer.telegram_id, buyer_message)
+
             return True
             
         except Exception as e:

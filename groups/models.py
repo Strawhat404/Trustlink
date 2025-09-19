@@ -3,6 +3,41 @@ from django.utils import timezone
 import uuid
 
 class GroupListing(models.Model):
+    # ... (existing fields) ...
+
+class GroupStateLog(models.Model):
+    """
+    Stores periodic snapshots of a group's state for monitoring.
+    """
+    listing = models.ForeignKey(GroupListing, on_delete=models.CASCADE, related_name='state_logs')
+    timestamp = models.DateTimeField(auto_now_add=True)
+    member_count = models.IntegerField(default=0)
+    public_link = models.CharField(max_length=255, null=True, blank=True)
+    title = models.CharField(max_length=255)
+    description_hash = models.CharField(max_length=64)  # SHA256 hash of the description
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"Log for {self.listing.group_title} at {self.timestamp}"
+
+class AdminChangeLog(models.Model):
+    """
+    Logs changes in group administrators for security auditing.
+    """
+    listing = models.ForeignKey(GroupListing, on_delete=models.CASCADE, related_name='admin_changes')
+    timestamp = models.DateTimeField(auto_now_add=True)
+    admin_user_id = models.BigIntegerField()
+    admin_username = models.CharField(max_length=255, null=True, blank=True)
+    action = models.CharField(max_length=50, choices=[('added', 'Admin Added'), ('removed', 'Admin Removed')])
+    performed_by_user_id = models.BigIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.action.capitalize()} admin {self.admin_username} for {self.listing.group_title}"
     """Model for Telegram group listings"""
     
     STATUS_CHOICES = [
