@@ -81,6 +81,7 @@ logger = logging.getLogger(__name__)
 (
     REGISTRATION_NAME,
     REGISTRATION_CONFIRM,
+    GROUP_LISTING_USERNAME,
     GROUP_LISTING_TITLE,
     GROUP_LISTING_DESCRIPTION,
     GROUP_LISTING_PRICE,
@@ -90,7 +91,7 @@ logger = logging.getLogger(__name__)
     TRANSACTION_CURRENCY,
     TRANSACTION_CONFIRM,
     DISPUTE_DESCRIPTION,
-) = range(11)
+) = range(12)
 
 class TrustlinkBot:
     """
@@ -141,6 +142,7 @@ class TrustlinkBot:
         listing_handler = ConversationHandler(
             entry_points=[CommandHandler("list_group", self.list_group_start)],
             states={
+                GROUP_LISTING_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.list_group_username)],
                 GROUP_LISTING_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.list_group_title)],
                 GROUP_LISTING_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.list_group_description)],
                 GROUP_LISTING_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.list_group_price)],
@@ -566,14 +568,56 @@ Happy trading! 🚀
             return ConversationHandler.END
         
         await update.message.reply_text(
-            "🏪 **Create Group Listing**\n\n"
-            "Let's create a listing for your Telegram group!\n\n"
-            "First, please enter the **title** of your group:",
+            "🏪 **Create Group Listing: Step 1 of 5**\n\n"
+            "To begin, please provide your group's username (e.g., @mygroup).\n\n"
+            "*Note: For verification, this bot must be an administrator in your group.*",
             parse_mode=ParseMode.MARKDOWN
         )
         
-        return GROUP_LISTING_TITLE
+        return GROUP_LISTING_USERNAME
     
+    async def list_group_username(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle group username input and verify ownership."""
+        group_username = update.message.text.strip()
+        if not group_username.startswith('@'):
+            group_username = f"@{group_username}"
+
+        try:
+            # Check if bot is an admin
+            bot_user = await context.bot.get_me()
+            admins = await context.bot.get_chat_administrators(group_username)
+            if not any(admin.user.id == bot_user.id for admin in admins):
+                await update.message.reply_text(
+                    "❌ **Verification Failed**\n\nI am not an administrator in that group. Please add me as an admin and try again.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return ConversationHandler.END
+
+            # Check if the user is the creator
+            creator = next((admin for admin in admins if admin.status == 'creator'), None)
+            if not creator or creator.user.id != update.effective_user.id:
+                await update.message.reply_text(
+                    "❌ **Ownership Verification Failed**\n\nYou are not the creator of this group. Only the group owner can list it for sale.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return ConversationHandler.END
+
+            context.user_data['listing_group_username'] = group_username
+            await update.message.reply_text(
+                f"✅ **Ownership Confirmed for {group_username}**\n\n"
+                "Next, please enter the **title** for your listing:",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return GROUP_LISTING_TITLE
+
+        except Exception as e:
+            logger.error(f"Error verifying group ownership for {group_username}: {e}")
+            await update.message.reply_text(
+                "❌ **Error**\n\nI couldn't find that group or an error occurred. Please ensure the username is correct and the group is public.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return ConversationHandler.END
+
     async def list_group_title(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle group title input"""
         
@@ -589,7 +633,7 @@ Happy trading! 🚀
         
         await update.message.reply_text(
             f"✅ Title: **{title}**\n\n"
-            "Now, please provide a **description** of your group (what it's about, rules, etc.):",
+            "**Step 3 of 5:** Now, please provide a **description** of your group (what it's about, rules, etc.):",
             parse_mode=ParseMode.MARKDOWN
         )
         
@@ -610,7 +654,7 @@ Happy trading! 🚀
         
         await update.message.reply_text(
             "✅ Description saved!\n\n"
-            "What's your asking **price in USD**? (Enter just the number, e.g., 150):",
+            "**Step 4 of 5:** What's your asking **price in USD**? (Enter just the number, e.g., 150):",
             parse_mode=ParseMode.MARKDOWN
         )
         
@@ -647,7 +691,7 @@ Happy trading! 🚀
         
         await update.message.reply_text(
             f"✅ Price: **${price:.2f} USD**\n\n"
-            "Please select the category that best describes your group:",
+            "**Step 5 of 5:** Please select the category that best describes your group:",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=reply_markup
         )
@@ -678,26 +722,31 @@ Happy trading! 🚀
         title = context.user_data.get('listing_title', '')
         description = context.user_data.get('listing_description', '')
         price = context.user_data.get('listing_price', 0)
+        group_username = context.user_data.get('listing_group_username', '')
         
-        confirmation_text = f"""
-📋 **Listing Confirmation**
+        # Escape special characters for Markdown
+        safe_title = escape_markdown(title, version=2)
+        safe_description = escape_markdown(description[:200], version=2)
+        safe_username = escape_markdown(group_username, version=2)
+        safe_category = escape_markdown(category_names.get(category, category), version=2)
+        
+        confirmation_text = f"""📋 *Listing Confirmation*
 
-**Group Details:**
-• Title: {title}
-• Category: {category_names.get(category, category)}
+*Group Details:*
+• Group: {safe_username}
+• Title: {safe_title}
+• Category: {safe_category}
 • Price: ${price:.2f} USD
 
-**Description:**
-{description[:200]}{'...' if len(description) > 200 else ''}
+*Description:*
+{safe_description}{'\\.\\.\\.' if len(description) > 200 else ''}
 
-**Important Notes:**
-• You must be an admin of the group to list it
-• Group ownership verification will be required
+*Important Notes:*
+• Group ownership has been verified ✅
 • 5% platform fee applies to successful sales
 • Listing expires after 30 days
 
-Ready to create this listing?
-        """
+Ready to create this listing?"""
         
         keyboard = [
             [InlineKeyboardButton("✅ Create Listing", callback_data="confirm_listing")],
@@ -707,7 +756,7 @@ Ready to create this listing?
         
         await query.edit_message_text(
             confirmation_text,
-            parse_mode=ParseMode.MARKDOWN,
+            parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=reply_markup
         )
         
@@ -728,28 +777,50 @@ Ready to create this listing?
         telegram_user = await self._get_telegram_user(user.id)
         
         try:
-            # TODO: In a real implementation, we would:
-            # 1. Verify the user is admin of the group
-            # 2. Get actual group information from Telegram API
-            # 3. Create the GroupListing record
+            # Get listing data from context
+            title = context.user_data.get('listing_title', '')
+            description = context.user_data.get('listing_description', '')
+            price = context.user_data.get('listing_price', 0)
+            category = context.user_data.get('listing_category', 'OTHER')
+            group_username = context.user_data.get('listing_group_username', '')
             
-            success_message = """
-✅ **Listing Created Successfully!**
+            # Get group information from Telegram API
+            chat = await context.bot.get_chat(group_username)
+            member_count = await context.bot.get_chat_member_count(group_username)
+            
+            # Create the GroupListing record
+            @sync_to_async
+            def create_listing():
+                return GroupListing.objects.create(
+                    seller=telegram_user,
+                    group_title=title,
+                    group_description=description,
+                    group_username=group_username,
+                    group_chat_id=chat.id,
+                    member_count=member_count,
+                    price_usd=price,
+                    category=category,
+                    status='ACTIVE'
+                )
+            
+            listing = await create_listing()
+            
+            success_message = f"""✅ **Listing Created Successfully!**
 
-Your group listing has been created and is now pending verification.
+Your group listing has been created and is now live!
 
-**Next Steps:**
-1. Our bot will verify your admin status
-2. Group information will be validated
-3. Listing will go live within 24 hours
+**Listing Details:**
+• ID: {listing.id}
+• Group: {group_username}
+• Price: ${price:.2f} USD
+• Status: Active
 
 **What happens next:**
-• Buyers can browse and contact you
-• Escrow transactions are handled automatically
-• You'll receive notifications for all activity
+• Buyers can now browse and purchase your group
+• All transactions are handled through secure escrow
+• You'll receive notifications for purchase requests
 
-Use /my_listings to manage your listings anytime!
-            """
+Use `/my_listings` to manage your listings anytime!"""
             
             keyboard = [
                 [InlineKeyboardButton("🏪 My Listings", callback_data="my_listings")],
@@ -918,86 +989,89 @@ Use /my_listings to manage your listings anytime!
                 parse_mode=ParseMode.MARKDOWN
             )
 
-            # Clear context
-            context.user_data.pop('transaction_listing_id', None)
-            context.user_data.pop('transaction_currency', None)
-
+            context.user_data.clear()
+            return ConversationHandler.END
+        except Exception as e:
+            logger.error(f"transaction_confirm error: {str(e)}")
+            await query.edit_message_text("❌ Failed to create transaction.")
             return ConversationHandler.END
 
-        payment_url = charge.get('payment_url')
-        await query.edit_message_text(
-            f"✅ Escrow created!\n\n"
-            f"Transaction ID: `{txn.id}`\n"
-            f"Amount: {txn.amount} {txn.currency}\n\n"
-            f"👉 Complete your payment here:\n{payment_url}",
-            parse_mode=ParseMode.MARKDOWN
-        )
-
-
-    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Log the error and send a telegram message to notify the user."""
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+        """Log Errors caused by Updates."""
         logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
 
-        # Don't try to send a message if the update is None (can happen with some network errors)
         if update and hasattr(update, 'effective_message') and update.effective_message:
-            await update.effective_message.reply_text(
-                "❌ An unexpected error occurred. Please try again or contact support if the problem persists."
-            )
+            await update.effective_message.reply_text("❌ An unexpected error occurred. Please try again.")
 
-    # Helper methods for database operations
+    # --- Database Helper Methods ---
+
     @staticmethod
     @sync_to_async
     def _get_telegram_user(telegram_id: int) -> Optional[TelegramUser]:
         """Get TelegramUser by telegram_id"""
-                telegram_user = TelegramUser.objects.create(
-                    telegram_id=user.id,
-                    username=user.username,
-                    first_name=user.first_name,
-                    last_name=user.last_name,
-                    is_verified=False,
-                    user=django_user
-                )
-                
-                return telegram_user
-        
-        return await get_or_create_user()
-    
-    async def _save_telegram_user(self, telegram_user: TelegramUser):
-        """Save TelegramUser to database"""
-        await sync_to_async(telegram_user.save)()
-    
-    async def _log_message(self, user_id: int, message_type: str, content: str):
-        """Log bot message to database"""
         try:
-            telegram_user = await self._get_telegram_user(user_id)
-            if telegram_user:
-                await sync_to_async(BotMessage.objects.create)(
-                    user=telegram_user,
-                    message_type=message_type,
-                    content=content[:1000]  # Truncate if too long
-                )
-        except Exception as e:
-            logger.error(f"Failed to log message: {e}")
-    
-    async def _get_user_transaction_count(self, user: TelegramUser, role: str) -> int:
-        """Get transaction count for user as buyer or seller"""
+            return TelegramUser.objects.get(telegram_id=telegram_id)
+        except TelegramUser.DoesNotExist:
+            return None
+
+    @staticmethod
+    @sync_to_async
+    def _get_or_create_telegram_user(user: 'telegram.User') -> TelegramUser:
+        """Get or create TelegramUser from Telegram user object"""
         try:
-            if role == 'buyer':
-                return await sync_to_async(EscrowTransaction.objects.filter(buyer=user).count)()
-            else:
-                return await sync_to_async(EscrowTransaction.objects.filter(seller=user).count)()
-        except Exception:
-            return 0
-    
-    async def _get_user_active_listings_count(self, user: TelegramUser) -> int:
-        """Get active listings count for user"""
+            return TelegramUser.objects.select_related('user').get(telegram_id=user.id)
+        except TelegramUser.DoesNotExist:
+            from django.contrib.auth.models import User
+            django_user = User.objects.create_user(username=f"user_{user.id}", password=User.objects.make_random_password())
+            return TelegramUser.objects.create(
+                user=django_user,
+                telegram_id=user.id,
+                username=user.username,
+                first_name=user.first_name,
+                last_name=user.last_name
+            )
+
+    @staticmethod
+    @sync_to_async
+    def _save_telegram_user(telegram_user: TelegramUser):
+        """Save a TelegramUser instance"""
+        telegram_user.save()
+
+    @staticmethod
+    @sync_to_async
+    def _get_user_transaction_count(telegram_user: TelegramUser, role: str) -> int:
+        """Get user's transaction count as buyer or seller"""
+        if role == 'buyer':
+            return EscrowTransaction.objects.filter(buyer=telegram_user).count()
+        return EscrowTransaction.objects.filter(seller=telegram_user).count()
+
+    @staticmethod
+    @sync_to_async
+    def _get_user_active_listings_count(telegram_user: TelegramUser) -> int:
+        """Get user's active listings count"""
+        return GroupListing.objects.filter(seller=telegram_user, status='ACTIVE').count()
+
+    @staticmethod
+    @sync_to_async
+    def _log_message(user_id: int, command: str, text: str):
+        """Log user message to database"""
         try:
-            return await sync_to_async(
-                GroupListing.objects.filter(seller=user, status='ACTIVE').count
-            )()
-        except Exception:
-            return 0
-    
+            telegram_user = TelegramUser.objects.get(telegram_id=user_id)
+            BotMessage.objects.create(
+                telegram_user=telegram_user,
+                message_type='COMMAND',
+                text=text,
+                command=command,
+                chat_id=user_id
+            )
+        except TelegramUser.DoesNotExist:
+            pass  # User not registered yet
+
+    def run(self):
+        """Run the bot"""
+        logger.info("Starting bot...")
+        self.application.run_polling()
+
 
 def main(token: Optional[str] = None):
     """Main function to run the bot"""
