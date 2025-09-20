@@ -30,7 +30,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from asgiref.sync import sync_to_async
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application, 
     CommandHandler, 
@@ -104,8 +104,8 @@ class TrustlinkBot:
     def __init__(self, token: str):
         """Initialize the bot with the given token"""
         self.token = token
-        # Set a longer timeout to handle slow network conditions
-        self.application = Application.builder().token(token).pool_timeout(30.0).build()
+        # Set a longer timeout and a post_init hook to set the command menu
+        self.application = Application.builder().token(token).pool_timeout(30.0).post_init(self.post_init).build()
         self._setup_handlers()
     
     def _setup_handlers(self):
@@ -214,41 +214,27 @@ Need help? Use `/help` anytime!"""
         )
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle the /help command"""
+        """Handle the /help command, works for both command and callback_query"""
         
         help_text = """📚 *Trustlink Help Guide*
 
 *Available Commands:*
-• /start - Welcome message and main menu
-• /help - Show this help message
-• /register - Register as a new user
-• /profile - View your profile and stats
-• /list_group - Create a new group listing
-• /buy - Browse and purchase groups
-• /transactions - View transaction history
-• /cancel - Cancel current operation
-
-*How Escrow Works:*
-1️⃣ Buyer initiates purchase through bot
-2️⃣ Funds are held securely in escrow
-3️⃣ Seller transfers group ownership
-4️⃣ Buyer confirms receipt
-5️⃣ Funds are released to seller
-
-*Security Features:*
-🔐 Secure payment processing via Coinbase Commerce
-🛡️ Dispute resolution system
-📊 Transaction tracking and history
-✅ User verification system
-
-*Supported Cryptocurrencies:*
-• USDT (Tether)
-• ETH (Ethereum)  
-• BTC (Bitcoin)
-
-Need help? Contact our support team anytime!"""
+• `/start` \- Welcome message
+• `/help` \- Show this help message
+• `/register` \- Register as a new user
+• `/profile` \- View your profile
+• `/browse` \- Browse group listings
+• `/view <id>` \- View a specific listing
+• `/list_group` \- Create a new group listing
+• `/cancel` \- Cancel current operation"""
         
-        await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+        # Determine how to reply based on the update type
+        if update.callback_query:
+            # If it's a button press, edit the message
+            await update.callback_query.edit_message_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
+        elif update.message:
+            # If it's a command, send a new message
+            await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
 
     async def buy_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /buy command - show active listings to purchase"""
@@ -288,12 +274,14 @@ Need help? Contact our support team anytime!"""
                 response.raise_for_status()
                 listings = response.json()
 
-            if not listings:
+            listings_data = listings.get('results', [])
+
+            if not listings_data:
                 await update.message.reply_text("🛍️ No active listings available right now. Please check back later.")
                 return
 
             message = "*🔥 Top Group Listings*\n\n"
-            for listing in listings[:10]: # Show top 10
+            for listing in listings_data[:10]: # Show top 10
                 message += f"- *{escape_markdown(listing['group_title'], version=2)}*\n"
                 message += f"  Member Count: {listing['member_count']}\n"
                 message += f"  Price: ${listing['price_usd']}\n"
@@ -730,7 +718,8 @@ Happy trading! 🚀
         safe_username = escape_markdown(group_username, version=2)
         safe_category = escape_markdown(category_names.get(category, category), version=2)
         
-        confirmation_text = f"""📋 *Listing Confirmation*
+        try:
+            confirmation_text = f"""📋 *Listing Confirmation*
 
 *Group Details:*
 • Group: {safe_username}
@@ -747,18 +736,42 @@ Happy trading! 🚀
 • Listing expires after 30 days
 
 Ready to create this listing?"""
-        
-        keyboard = [
-            [InlineKeyboardButton("✅ Create Listing", callback_data="confirm_listing")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="cancel_listing")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            confirmation_text,
-            parse_mode=ParseMode.MARKDOWN_V2,
-            reply_markup=reply_markup
-        )
+            
+            keyboard = [
+                [InlineKeyboardButton("✅ Create Listing", callback_data="confirm_listing")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="cancel_listing")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                confirmation_text,
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.error(f"Error in list_group_category: {e}")
+            # Fallback to plain text
+            simple_text = f"""📋 Listing Confirmation
+
+Group: {group_username}
+Title: {title}
+Category: {category_names.get(category, category)}
+Price: ${price:.2f} USD
+
+Description: {description[:200]}{'...' if len(description) > 200 else ''}
+
+Ready to create this listing?"""
+            
+            keyboard = [
+                [InlineKeyboardButton("✅ Create Listing", callback_data="confirm_listing")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="cancel_listing")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                simple_text,
+                reply_markup=reply_markup
+            )
         
         return GROUP_LISTING_CONFIRM
     
@@ -796,7 +809,7 @@ Ready to create this listing?"""
                     group_title=title,
                     group_description=description,
                     group_username=group_username,
-                    group_chat_id=chat.id,
+                    group_id=chat.id,
                     member_count=member_count,
                     price_usd=price,
                     category=category,
@@ -1066,6 +1079,18 @@ Use `/my_listings` to manage your listings anytime!"""
             )
         except TelegramUser.DoesNotExist:
             pass  # User not registered yet
+
+    async def post_init(self, application: Application):
+        """Sets the bot's command menu after initialization."""
+        commands = [
+            BotCommand("start", "▶️ Start the bot and see main menu"),
+            BotCommand("browse", "🏪 Browse available group listings"),
+            BotCommand("list_group", "📝 List your group for sale"),
+            BotCommand("profile", "👤 View your user profile"),
+            BotCommand("help", "❓ Get help and see all commands"),
+            BotCommand("cancel", "❌ Cancel the current operation"),
+        ]
+        await application.bot.set_my_commands(commands)
 
     def run(self):
         """Run the bot"""
