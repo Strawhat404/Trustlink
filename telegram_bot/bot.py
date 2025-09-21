@@ -30,7 +30,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from asgiref.sync import sync_to_async
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application, 
     CommandHandler, 
@@ -105,22 +105,30 @@ class TrustlinkBot:
         """Initialize the bot with the given token"""
         self.token = token
         # Set a longer timeout and a post_init hook to set the command menu
-        self.application = Application.builder().token(token).pool_timeout(30.0).post_init(self.post_init).build()
+        self.application = Application.builder().token(token).pool_timeout(30.0).build()
         self._setup_handlers()
     
     def _setup_handlers(self):
         """Set up all command and message handlers"""
         
-        # Basic command handlers
+        # Command Handlers
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("profile", self.profile_command))
-        self.application.add_handler(CommandHandler("transactions", self.transactions_command))
-        self.application.add_handler(CommandHandler("my_listings", self.my_listings_command))
-        self.application.add_handler(CommandHandler("buy", self.buy_command))
         self.application.add_handler(CommandHandler("browse", self.browse_command))
         self.application.add_handler(CommandHandler("view", self.view_command))
         self.application.add_handler(CommandHandler("cancel", self.cancel_command))
+
+        # Message Handlers for Keyboard Buttons
+        self.application.add_handler(MessageHandler(filters.Regex('^🏪 Browse Listings$'), self.browse_command))
+        self.application.add_handler(MessageHandler(filters.Regex('^📝 List a Group$'), self.list_group_start))
+        self.application.add_handler(MessageHandler(filters.Regex('^👤 My Profile$'), self.profile_command))
+        self.application.add_handler(MessageHandler(filters.Regex('^❓ Help$'), self.help_command))
+
+        # Callback Handlers for contextual menus
+        self.application.add_handler(CallbackQueryHandler(self.my_listings_command, pattern='^my_listings$'))
+        self.application.add_handler(CallbackQueryHandler(self.transactions_command, pattern='^transactions$'))
+        self.application.add_handler(CallbackQueryHandler(self.profile_command, pattern='^profile$'))
         
         # Registration conversation handler
         registration_handler = ConversationHandler(
@@ -187,25 +195,13 @@ class TrustlinkBot:
 
 Hi {first_name}! I'm your secure escrow bot for safe Telegram group transactions.
 
-*What I can help you with:*
-🛡️ Secure escrow transactions
-💰 Buy/sell Telegram groups safely  
-📊 Track your transaction history
-🔐 Dispute resolution support
-
-*Getting Started:*
-1️⃣ Register your account with `/register`
-2️⃣ Browse groups with `/buy`
-3️⃣ List your own groups with `/list_group`
-
-Need help? Use `/help` anytime!"""
+Use the menu below to navigate the bot's features."""
         
         keyboard = [
-            [InlineKeyboardButton("📝 Register", callback_data="register")],
-            [InlineKeyboardButton("❓ Help", callback_data="help")],
-            [InlineKeyboardButton("🏪 Browse Groups", callback_data="browse_groups")],
+            [KeyboardButton("🏪 Browse Listings"), KeyboardButton("📝 List a Group")],
+            [KeyboardButton("👤 My Profile"), KeyboardButton("❓ Help")],
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         
         await update.message.reply_text(
             welcome_message,
@@ -518,30 +514,69 @@ Happy trading! 🚀
 • Total Purchases: {total_purchases}
 • Total Sales: {total_sales}
 • Active Listings: {active_listings}
-• User ID: `{telegram_user.telegram_id}`
-
-*Account Actions:*"""
+• User ID: `{telegram_user.telegram_id}`"""
         
         keyboard = [
-            [InlineKeyboardButton("📊 Transaction History", callback_data="transactions")],
-            [InlineKeyboardButton("🏪 My Listings", callback_data="my_listings")],
-            [InlineKeyboardButton("🔄 Refresh Profile", callback_data="profile")],
+            [InlineKeyboardButton("🏪 My Listings", callback_data="my_listings"), InlineKeyboardButton("📊 Transaction History", callback_data="transactions")],
+            [InlineKeyboardButton("🔄 Refresh", callback_data="profile")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            profile_text,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=reply_markup
-        )
+
+        # Determine how to reply based on the update type
+        if update.callback_query:
+            await update.callback_query.edit_message_text(profile_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup)
+        elif update.message:
+            await update.message.reply_text(profile_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup)
 
     async def transactions_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle the /transactions command (placeholder)"""
-        await update.message.reply_text("📊 Transaction history feature coming soon!")
+        """Displays the user's transaction history."""
+        user = update.effective_user
+        telegram_user = await self._get_telegram_user(user.id)
+        if not telegram_user:
+            await update.callback_query.answer("You need to be registered to see transactions.")
+            return
+
+        transactions = await sync_to_async(list)(EscrowTransaction.objects.filter(buyer=telegram_user).order_by('-created_at')[:10])
+
+        message = "*📊 Your Recent Transactions*\n\n"
+        if not transactions:
+            message += "You have no recent transactions."
+        else:
+            for txn in transactions:
+                message += f"▪️ *{escape_markdown(txn.listing.group_title, version=2)}* \- ${txn.amount} {txn.currency} \- *Status:* {txn.status}\n"
+
+        keyboard = [[InlineKeyboardButton("⬅️ Back to Profile", callback_data="profile")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if update.callback_query:
+            await update.callback_query.edit_message_text(message, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup)
+        elif update.message:
+            await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup)
 
     async def my_listings_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle the /my_listings command (placeholder)"""
-        await update.message.reply_text("📝 My listings feature coming soon!")
+        """Displays the user's group listings."""
+        user = update.effective_user
+        telegram_user = await self._get_telegram_user(user.id)
+        if not telegram_user:
+            await update.callback_query.answer("You need to be registered to see your listings.")
+            return
+
+        listings = await sync_to_async(list)(GroupListing.objects.filter(seller=telegram_user).order_by('-created_at')[:10])
+
+        message = "*🏪 Your Group Listings*\n\n"
+        if not listings:
+            message += "You have no active listings. Use `/list_group` to create one."
+        else:
+            for listing in listings:
+                message += f"▪️ *{escape_markdown(listing.group_title, version=2)}* \- ${listing.price_usd} \- *Status:* {listing.status}\n"
+
+        keyboard = [[InlineKeyboardButton("⬅️ Back to Profile", callback_data="profile")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if update.callback_query:
+            await update.callback_query.edit_message_text(message, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup)
+        elif update.message:
+            await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup)
     
     async def list_group_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start the group listing process"""
@@ -1079,18 +1114,6 @@ Use `/my_listings` to manage your listings anytime!"""
             )
         except TelegramUser.DoesNotExist:
             pass  # User not registered yet
-
-    async def post_init(self, application: Application):
-        """Sets the bot's command menu after initialization."""
-        commands = [
-            BotCommand("start", "▶️ Start the bot and see main menu"),
-            BotCommand("browse", "🏪 Browse available group listings"),
-            BotCommand("list_group", "📝 List your group for sale"),
-            BotCommand("profile", "👤 View your user profile"),
-            BotCommand("help", "❓ Get help and see all commands"),
-            BotCommand("cancel", "❌ Cancel the current operation"),
-        ]
-        await application.bot.set_my_commands(commands)
 
     def run(self):
         """Run the bot"""
