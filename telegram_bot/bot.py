@@ -262,35 +262,120 @@ Use the menu below to navigate the bot's features."""
 
     async def browse_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /browse command to show marketplace listings."""
-        await update.message.reply_text("🔎 Searching for the latest group listings...")
-
+        chat_id = update.effective_chat.id
+        
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{API_BASE_URL}/groups/listings/")
-                response.raise_for_status()
-                listings = response.json()
-
-            listings_data = listings.get('results', [])
-
-            if not listings_data:
-                await update.message.reply_text("🛍️ No active listings available right now. Please check back later.")
-                return
-
-            message = "*🔥 Top Group Listings*\n\n"
-            for listing in listings_data[:10]: # Show top 10
-                message += f"- *{escape_markdown(listing['group_title'], version=2)}*\n"
-                message += f"  Member Count: {listing['member_count']}\n"
-                message += f"  Price: ${listing['price_usd']}\n"
-                message += f"  To view details, use: `/view {listing['id']}`\n\n"
+            # Send a typing action to show the bot is working
+            await context.bot.send_chat_action(chat_id=chat_id, action='typing')
             
-            await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN_V2)
+            # Try to get the message object to edit later
+            try:
+                status_message = await update.message.reply_text("🔎 Searching for the latest group listings...")
+                message_id = status_message.message_id
+            except:
+                message_id = None
+            
+            try:
+                # Add a timeout to the request
+                timeout = httpx.Timeout(10.0, connect=30.0)
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    # Try to connect to the API
+                    try:
+                        response = await client.get(f"{API_BASE_URL}/groups/listings/")
+                        response.raise_for_status()
+                        listings = response.json()
+                    except httpx.ConnectError as e:
+                        logger.error(f"Connection error while accessing API: {e}")
+                        error_msg = "❌ Could not connect to the marketplace. Please make sure the server is running."
+                        if message_id:
+                            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=error_msg)
+                        else:
+                            await update.message.reply_text(error_msg)
+                        return
+                    except httpx.HTTPStatusError as e:
+                        logger.error(f"API returned error status: {e.response.status_code} - {e.response.text}")
+                        error_msg = "❌ There was an error retrieving listings. Please try again later."
+                        if message_id:
+                            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=error_msg)
+                        else:
+                            await update.message.reply_text(error_msg)
+                        return
+                    except Exception as e:
+                        logger.error(f"Unexpected error while processing API response: {e}")
+                        error_msg = "❌ An unexpected error occurred while processing the listings."
+                        if message_id:
+                            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=error_msg)
+                        else:
+                            await update.message.reply_text(error_msg)
+                        return
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"API error while browsing listings: {e}")
-            await update.message.reply_text("Sorry, there was an error connecting to the marketplace. Please try again later.")
+                listings_data = listings.get('results', [])
+
+                if not listings_data:
+                    no_listings_msg = "🛍️ No active listings available right now. Please check back later."
+                    if message_id:
+                        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=no_listings_msg)
+                    else:
+                        await update.message.reply_text(no_listings_msg)
+                    return
+
+                # Format the listings into a message
+                message = "*🔥 Top Group Listings*\n\n"
+                for listing in listings_data[:10]:  # Show top 10
+                    try:
+                        # Clean and escape the title
+                        title = escape_markdown(str(listing.get('group_title', 'Untitled')), version=2)
+                        member_count = listing.get('member_count', 0)
+                        price = listing.get('price_usd', '0.00')
+                        listing_id = listing.get('id', '').strip()
+                        
+                        message += f"- *{title}*\n"
+                        message += f"  👥 {member_count} members\n"
+                        message += f"  💰 ${price}\n"
+                        message += f"  📝 `/view {listing_id}`\n\n"
+                    except Exception as e:
+                        logger.error(f"Error formatting listing {listing.get('id')}: {e}")
+                        continue
+                
+                # Add a footer
+                message += "\nUse `/view <id>` to see more details about a listing."
+                
+                # Send or update the message
+                if message_id:
+                    try:
+                        await context.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=message,
+                            parse_mode=ParseMode.MARKDOWN_V2,
+                            disable_web_page_preview=True
+                        )
+                    except Exception as e:
+                        logger.error(f"Error updating message: {e}")
+                        # If we can't edit the message, send a new one
+                        await update.message.reply_text(
+                            message,
+                            parse_mode=ParseMode.MARKDOWN_V2,
+                            disable_web_page_preview=True
+                        )
+                else:
+                    await update.message.reply_text(
+                        message,
+                        parse_mode=ParseMode.MARKDOWN_V2,
+                        disable_web_page_preview=True
+                    )
+                
+            except Exception as e:
+                logger.error(f"Error in browse_command: {e}", exc_info=True)
+                error_msg = "❌ An error occurred while fetching listings. Please try again."
+                if message_id:
+                    await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=error_msg)
+                else:
+                    await update.message.reply_text(error_msg)
+        
         except Exception as e:
-            logger.error(f"Error in /browse command: {e}")
-            await update.message.reply_text("An unexpected error occurred. Please try again.")
+            logger.error(f"Unexpected error in browse_command: {e}", exc_info=True)
+            await update.message.reply_text("❌ An unexpected error occurred. Please try again later.")
 
     async def view_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /view <id> command to show listing details."""
@@ -1118,7 +1203,8 @@ Use `/my_listings` to manage your listings anytime!"""
     def run(self):
         """Run the bot"""
         logger.info("Starting bot...")
-        self.application.run_polling()
+        # The actual polling is handled in main()
+        pass
 
 
 def main(token: Optional[str] = None):
@@ -1136,7 +1222,16 @@ def main(token: Optional[str] = None):
     
     # Run the bot until the user presses Ctrl-C
     logger.info("Starting bot polling...")
-    bot.application.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    # Create application and run it
+    application = bot.application
+    
+    # Run the bot until the user presses Ctrl-C
+    application.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES,
+        close_loop=False
+    )
 
 if __name__ == '__main__':
     main()
