@@ -31,15 +31,8 @@ from datetime import datetime, timedelta
 from asgiref.sync import sync_to_async
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import (
-    Application, 
-    CommandHandler, 
-    MessageHandler, 
-    CallbackQueryHandler,
-    ConversationHandler,
-    filters,
-    ContextTypes
-)
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackContext, ApplicationBuilder, CallbackQueryHandler, ConversationHandler
 from telegram.constants import ParseMode
 from telegram.helpers import escape_markdown
 
@@ -104,9 +97,13 @@ class TrustlinkBot:
     def __init__(self, token: str):
         """Initialize the bot with the given token"""
         self.token = token
-        # Set a longer timeout and a post_init hook to set the command menu
-        self.application = Application.builder().token(token).pool_timeout(30.0).build()
+        # Create application with the token
+        self.application = ApplicationBuilder()\
+            .token(token)\
+            .build()
         self._setup_handlers()
+        # Set up error handler
+        self.application.add_error_handler(self.error_handler)
     
     def _setup_handlers(self):
         """Set up all command and message handlers"""
@@ -1207,9 +1204,8 @@ Use `/my_listings` to manage your listings anytime!"""
         pass
 
 
-def main(token: Optional[str] = None):
-    """Main function to run the bot"""
-    
+async def main_async(token: Optional[str] = None):
+    """Async main function to run the bot"""
     # Get bot token from argument or environment
     bot_token = token or settings.TELEGRAM_BOT_TOKEN
     
@@ -1218,20 +1214,49 @@ def main(token: Optional[str] = None):
         return
     
     # Create bot instance
+    logger.info("Initializing TrustlinkBot...")
     bot = TrustlinkBot(bot_token)
     
     # Run the bot until the user presses Ctrl-C
-    logger.info("Starting bot polling...")
+    logger.info("Starting bot...")
     
-    # Create application and run it
-    application = bot.application
-    
-    # Run the bot until the user presses Ctrl-C
-    application.run_polling(
-        drop_pending_updates=True,
-        allowed_updates=Update.ALL_TYPES,
-        close_loop=False
-    )
+    try:
+        # Start the bot using run_polling
+        await bot.application.initialize()
+        await bot.application.start()
+        await bot.application.updater.start_polling(drop_pending_updates=True)
+        
+        logger.info("Bot is running. Press Ctrl+C to stop.")
+        
+        # Keep the application running
+        while True:
+            await asyncio.sleep(1)
+            
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Error in bot: {e}")
+        raise
+    finally:
+        # Clean up
+        try:
+            if bot.application.running:
+                if hasattr(bot.application, 'updater') and hasattr(bot.application.updater, 'running') and bot.application.updater.running:
+                    await bot.application.updater.stop()
+                if hasattr(bot.application, 'stop'):
+                    await bot.application.stop()
+                if hasattr(bot.application, 'shutdown'):
+                    await bot.application.shutdown()
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+            
+        logger.info("Bot has been stopped")
+
+def main(token: Optional[str] = None):
+    """Synchronous wrapper for the async main function"""
+    import asyncio
+    asyncio.run(main_async(token))
 
 if __name__ == '__main__':
-    main()
+    import asyncio
+    asyncio.run(main())

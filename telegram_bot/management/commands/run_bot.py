@@ -31,6 +31,7 @@ class Command(BaseCommand):
         """
         Main command handler that starts the Telegram bot
         """
+        import asyncio
         
         # Get bot token
         bot_token = options.get('token') or settings.TELEGRAM_BOT_TOKEN
@@ -46,20 +47,13 @@ class Command(BaseCommand):
         
         self.stdout.write("Starting Trustlink Telegram Bot...")
         self.stdout.write(f"Bot token: {bot_token[:10]}...")
+        self.stdout.write(self.style.SUCCESS('Starting bot... Press Ctrl+C to stop.'))
         
-        self.stdout.write(
-            self.style.SUCCESS(
-                'Starting bot... Press Ctrl+C to stop.'
-            )
-        )
         try:
+            from telegram_bot.bot import main as run_bot_main
             run_bot_main(token=bot_token)
         except KeyboardInterrupt:
-            self.stdout.write(
-                self.style.WARNING('\nBot stopped by user.')
-            )
+            self.stdout.write(self.style.WARNING('\nBot stopped by user.'))
         except Exception as e:
-            self.stdout.write(
-                self.style.ERROR(f'An unexpected error occurred: {str(e)}')
-            )
+            self.stdout.write(self.style.ERROR(f'An unexpected error occurred: {str(e)}'))
             logger.error(f"Bot startup error: {str(e)}")
