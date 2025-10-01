@@ -5,3 +5,4 @@ python-decouple==3.8
 requests==2.32.3
 python-telegram-bot==22.4
 httpx==0.27.0
+tzlocal==5.2
