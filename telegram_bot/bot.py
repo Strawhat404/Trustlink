@@ -26,7 +26,7 @@ Bot Commands:
 
 import logging
 import asyncio
-import pytz
+
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from asgiref.sync import sync_to_async
@@ -116,16 +116,17 @@ class TrustlinkBot:
         """Initialize the bot with the given token"""
         self.token = token
 
-        # Get system timezone
-        import tzlocal
-
-        system_tz = tzlocal.get_localzone()
-
-        # Create defaults with system timezone
-        defaults = Defaults(tzinfo=system_tz, parse_mode=ParseMode.HTML)
-
-        # Create application with the token using the latest API
-        self.application = Application.builder().token(token).defaults(defaults).build()
+        # Create application without JobQueue to avoid APScheduler timezone issues
+        # Since this bot doesn't use scheduled jobs, we can safely disable JobQueue
+        defaults = Defaults(parse_mode=ParseMode.HTML)
+        
+        self.application = (
+            Application.builder()
+            .token(token)
+            .defaults(defaults)
+            .job_queue(False)  # Disable JobQueue completely
+            .build()
+        )
 
         self._setup_handlers()
         # Set up error handler
