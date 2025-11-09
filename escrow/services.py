@@ -354,8 +354,11 @@ class EscrowService:
 
                 logger.info(f"Transaction {transaction_id} completed successfully")
 
+                # Send completion notifications to both parties
+                from telegram_bot.notification_scheduler import NotificationScheduler
+                NotificationScheduler.notify_transfer_complete(escrow_transaction)
+
                 # TODO: Trigger actual fund release to seller's wallet
-                # TODO: Send completion notifications to both parties
 
                 return True
 
@@ -503,8 +506,11 @@ class EscrowService:
                     f"Dispute created for transaction {transaction_id} by user {opened_by.telegram_id}"
                 )
 
+                # Send notifications
+                from telegram_bot.notification_scheduler import NotificationScheduler
+                NotificationScheduler.notify_dispute_opened(dispute)
+
                 # TODO: Send notifications to admin team
-                # TODO: Send notification to other party
 
                 return dispute
 

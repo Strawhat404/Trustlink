@@ -66,18 +66,49 @@ class DisputeResolutionService:
                 transaction_id=transaction.id,
                 reason=f"Dispute resolved in favor of buyer. Notes: {notes}"
             )
-        else:
-            # For rulings like 'PARTIAL_REFUND' or 'NO_ACTION', we just log it for now.
-            # A more complex implementation would handle partial refunds.
-            logger.info(f"Dispute {dispute.id} resolved with ruling '{ruling}'. No fund movement required.")
-            transaction.status = 'COMPLETED' # Or another appropriate status
-            transaction.notes = f"Dispute resolved with ruling: {ruling}. Notes: {notes}"
+        elif ruling == 'PARTIAL_REFUND':
+            # For partial refunds, we mark the transaction and log it
+            # In a real implementation, you would calculate the partial amount
+            # and process both a partial refund and partial payment to seller
+            logger.info(f"Dispute {dispute.id} resolved with PARTIAL_REFUND ruling.")
+            transaction.status = 'COMPLETED'
+            transaction.notes = f"Dispute resolved with partial refund. Admin notes: {notes}"
+            transaction.save()
+            
+            # Log the partial refund action
+            from .models import AuditLog
+            AuditLog.objects.create(
+                transaction=transaction,
+                action='DISPUTE_RESOLVED',
+                details={
+                    'ruling': 'PARTIAL_REFUND',
+                    'notes': notes,
+                    'resolved_by': resolved_by.username
+                }
+            )
+            success = True
+        elif ruling == 'NO_ACTION':
+            # No action means the transaction continues as-is
+            logger.info(f"Dispute {dispute.id} resolved with NO_ACTION ruling.")
+            # Revert transaction status to previous state if it was disputed
+            if transaction.status == 'DISPUTED':
+                # Determine appropriate status based on transaction state
+                if transaction.funded_at:
+                    transaction.status = 'AWAITING_TRANSFER'
+                else:
+                    transaction.status = 'PENDING'
+            transaction.notes = f"Dispute resolved - no action taken. Admin notes: {notes}"
             transaction.save()
             success = True
+        else:
+            logger.error(f"Unknown ruling type: {ruling}")
+            success = False
 
         if success:
             logger.info(f"Successfully executed ruling for dispute {dispute.id}")
-            # TODO: Send notifications to buyer and seller about the resolution.
+            # Send notifications to buyer and seller about the resolution
+            from telegram_bot.notification_scheduler import NotificationScheduler
+            NotificationScheduler.notify_dispute_resolved(dispute)
         else:
             logger.error(f"Failed to execute ruling for dispute {dispute.id}")
             # Revert dispute status if execution failed?
