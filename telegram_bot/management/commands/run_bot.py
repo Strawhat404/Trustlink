@@ -13,7 +13,7 @@ from django.core.management.base import BaseCommand
 from django.conf import settings
 import logging
 
-from telegram_bot.bot import main as run_bot_main
+from telegram_bot.bot import main_async as run_bot_main_async
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS('Starting bot... Press Ctrl+C to stop.'))
         
         try:
-            from telegram_bot.bot import main as run_bot_main
-            run_bot_main(token=bot_token)
+            import asyncio
+            import nest_asyncio
+            nest_asyncio.apply()
+            asyncio.run(run_bot_main_async(token=bot_token))
         except KeyboardInterrupt:
             self.stdout.write(self.style.WARNING('\nBot stopped by user.'))
         except Exception as e:

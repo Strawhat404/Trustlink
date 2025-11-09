@@ -53,6 +53,15 @@ class GroupListing(models.Model):
     bot_is_admin = models.BooleanField(default=False)
     last_verified = models.DateTimeField(null=True, blank=True)
     
+    class Meta:
+        indexes = [
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['seller', 'status']),
+            models.Index(fields=['category', 'status']),
+            models.Index(fields=['group_id']),
+            models.Index(fields=['-created_at']),
+        ]
+
     def __str__(self):
         return f"{self.group_title} - ${self.price_usd}"
     
