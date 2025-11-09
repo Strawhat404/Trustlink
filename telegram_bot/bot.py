@@ -26,6 +26,7 @@ Bot Commands:
 
 import logging
 import asyncio
+import pytz
 
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -50,6 +51,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ConversationHandler,
     Defaults,
+    JobQueue,
 )
 from telegram.constants import ParseMode
 from telegram.helpers import escape_markdown
@@ -57,6 +59,52 @@ from telegram.helpers import escape_markdown
 import django
 import os
 import sys
+import pytz
+import datetime
+
+# Compatibility shim: ensure APScheduler accepts non-pytz tzinfo (e.g., datetime.timezone.utc)
+try:
+    import apscheduler.util as _aps_util
+
+    _orig_astimezone = _aps_util.astimezone
+
+    def _astimezone_compat(tz):
+        # If tz is None, defer to original
+        if tz is None:
+            return _orig_astimezone(tz)
+        # If tz is not a pytz tzinfo, coerce common cases
+        try:
+            import pytz as _pytz
+            if isinstance(tz, datetime.tzinfo) and not isinstance(tz, _pytz.BaseTzInfo):
+                # Map datetime.timezone.utc -> pytz.UTC
+                if tz is datetime.timezone.utc:
+                    return _pytz.UTC
+                # Try to resolve by name if available (zoneinfo-style .key or pytz-style .zone)
+                name = getattr(tz, 'key', None) or getattr(tz, 'zone', None)
+                if name:
+                    try:
+                        return _pytz.timezone(name)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return _orig_astimezone(tz)
+
+    _aps_util.astimezone = _astimezone_compat
+    # Also patch references imported into scheduler modules
+    try:
+        import apscheduler.schedulers.base as _aps_base
+        _aps_base.astimezone = _astimezone_compat
+    except Exception:
+        pass
+    try:
+        import apscheduler.schedulers.asyncio as _aps_asyncio
+        _aps_asyncio.astimezone = _astimezone_compat
+    except Exception:
+        pass
+except Exception:
+    # If apscheduler is not available yet for some reason, continue
+    pass
 
 # Add Django project to Python path dynamically
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -79,7 +127,7 @@ from escrow.payment_service import PaymentService
 from telegram_bot.models import BotSession, BotMessage
 import httpx
 
-API_BASE_URL = "http://127.0.0.1:8000/api"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000/api")
 
 # Set up logging
 logging.basicConfig(
@@ -116,15 +164,25 @@ class TrustlinkBot:
         """Initialize the bot with the given token"""
         self.token = token
 
-        # Create application without JobQueue to avoid APScheduler timezone issues
-        # Since this bot doesn't use scheduled jobs, we can safely disable JobQueue
+        # Get system timezone
+        try:
+            import tzlocal
+
+            system_tz = tzlocal.get_localzone()
+        except Exception:
+            from datetime import timezone
+
+            system_tz = timezone.utc
+
+        # Create defaults (timezone handled via tzlocal pytz fallback)
         defaults = Defaults(parse_mode=ParseMode.HTML)
-        
+
+        # Create application with the token using the latest API
+        # Force Application to use pytz timezone to satisfy APScheduler 3.x
         self.application = (
             Application.builder()
             .token(token)
             .defaults(defaults)
-            .job_queue(False)  # Disable JobQueue completely
             .build()
         )
 
@@ -265,8 +323,8 @@ class TrustlinkBot:
         # Check if user is already registered
         telegram_user = await self._get_or_create_telegram_user(user)
 
-        first_name = escape_markdown(user.first_name or "User", version=2)
-        welcome_message = f"""🎉 *Welcome to Trustlink!* 🎉
+        first_name = user.first_name or "User"
+        welcome_message = f"""🎉 **Welcome to Trustlink!** 🎉
 
 Hi {first_name}! I'm your secure escrow bot for safe Telegram group transactions.
 
@@ -285,27 +343,27 @@ Use the menu below to navigate the bot's features."""
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /help command, works for both command and callback_query"""
 
-        help_text = """📚 *Trustlink Help Guide*
+        help_text = """📚 **Trustlink Help Guide**
 
-*Available Commands:*
-• `/start` \- Welcome message
-• `/help` \- Show this help message
-• `/register` \- Register as a new user
-• `/profile` \- View your profile
-• `/browse` \- Browse group listings
-• `/view <id>` \- View a specific listing
-• `/list_group` \- Create a new group listing
-• `/cancel` \- Cancel current operation"""
+**Available Commands:**
+• `/start` - Welcome message
+• `/help` - Show this help message
+• `/register` - Register as a new user
+• `/profile` - View your profile
+• `/browse` - Browse group listings
+• `/view <id>` - View a specific listing
+• `/list_group` - Create a new group listing
+• `/cancel` - Cancel current operation"""
 
         # Determine how to reply based on the update type
         if update.callback_query:
             # If it's a button press, edit the message
             await update.callback_query.edit_message_text(
-                help_text, parse_mode=ParseMode.MARKDOWN_V2
+                help_text, parse_mode=ParseMode.MARKDOWN
             )
         elif update.message:
             # If it's a command, send a new message
-            await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
+            await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
     async def buy_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /buy command - show active listings to purchase"""
@@ -346,19 +404,29 @@ Use the menu below to navigate the bot's features."""
     async def browse_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /browse command to show marketplace listings."""
         chat_id = update.effective_chat.id
+        
+        # Check if this is a callback query or message
+        is_callback = bool(update.callback_query)
 
         try:
             # Send a typing action to show the bot is working
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
             # Try to get the message object to edit later
-            try:
-                status_message = await update.message.reply_text(
-                    "🔎 Searching for the latest group listings..."
-                )
-                message_id = status_message.message_id
-            except:
-                message_id = None
+            message_id = None
+            if is_callback:
+                # For callback queries, we'll edit the existing message
+                await update.callback_query.answer()
+                message_id = update.callback_query.message.message_id
+            else:
+                # For regular messages, send a status message
+                try:
+                    status_message = await update.message.reply_text(
+                        "🔎 Searching for the latest group listings..."
+                    )
+                    message_id = status_message.message_id
+                except:
+                    message_id = None
 
             try:
                 # Add a timeout to the request
@@ -416,22 +484,23 @@ Use the menu below to navigate the bot's features."""
                         await update.message.reply_text(no_listings_msg)
                     return
 
-                # Format the listings into a message
-                message = "*🔥 Top Group Listings*\n\n"
+                # Format the listings into a message - use HTML (more forgiving than Markdown)
+                # HTML only requires escaping: < > & 
+                message = "🔥 <b>Top Group Listings</b>\n\n"
                 for listing in listings_data[:10]:  # Show top 10
                     try:
-                        # Clean and escape the title
-                        title = escape_markdown(
-                            str(listing.get("group_title", "Untitled")), version=2
-                        )
+                        # Escape HTML special characters
+                        title = str(listing.get("group_title", "Untitled"))
+                        title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        
                         member_count = listing.get("member_count", 0)
                         price = listing.get("price_usd", "0.00")
                         listing_id = listing.get("id", "").strip()
 
-                        message += f"- *{title}*\n"
+                        message += f"• <b>{title}</b>\n"
                         message += f"  👥 {member_count} members\n"
                         message += f"  💰 ${price}\n"
-                        message += f"  📝 `/view {listing_id}`\n\n"
+                        message += f"  📝 /view {listing_id}\n\n"
                     except Exception as e:
                         logger.error(
                             f"Error formatting listing {listing.get('id')}: {e}"
@@ -439,32 +508,48 @@ Use the menu below to navigate the bot's features."""
                         continue
 
                 # Add a footer
-                message += "\nUse `/view <id>` to see more details about a listing."
+                message += "\nUse /view &lt;id&gt; to see more details about a listing."
 
-                # Send or update the message
+                # Send or update the message - use HTML (handles special chars better than Markdown)
                 if message_id:
                     try:
                         await context.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=message_id,
                             text=message,
-                            parse_mode=ParseMode.MARKDOWN_V2,
+                            parse_mode=ParseMode.HTML,
                             disable_web_page_preview=True,
                         )
                     except Exception as e:
                         logger.error(f"Error updating message: {e}")
                         # If we can't edit the message, send a new one
-                        await update.message.reply_text(
-                            message,
-                            parse_mode=ParseMode.MARKDOWN_V2,
+                        if is_callback:
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text=message,
+                                parse_mode=ParseMode.HTML,
+                                disable_web_page_preview=True,
+                            )
+                        else:
+                            await update.message.reply_text(
+                                message,
+                                parse_mode=ParseMode.HTML,
+                                disable_web_page_preview=True,
+                            )
+                else:
+                    if is_callback:
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=message,
+                            parse_mode=ParseMode.HTML,
                             disable_web_page_preview=True,
                         )
-                else:
-                    await update.message.reply_text(
-                        message,
-                        parse_mode=ParseMode.MARKDOWN_V2,
-                        disable_web_page_preview=True,
-                    )
+                    else:
+                        await update.message.reply_text(
+                            message,
+                            parse_mode=ParseMode.HTML,
+                            disable_web_page_preview=True,
+                        )
 
             except Exception as e:
                 logger.error(f"Error in browse_command: {e}", exc_info=True)
@@ -502,18 +587,12 @@ Use the menu below to navigate the bot's features."""
                 response.raise_for_status()
                 listing = response.json()
 
-            seller_username = escape_markdown(
-                listing["seller"]["username"] or "N/A", version=2
-            )
-            title = escape_markdown(listing["group_title"], version=2)
-            description = escape_markdown(listing["group_description"], version=2)
-
-            message = f"*📄 Listing Details: {title}*\n\n"
-            message += f"*Description:*\n{description}\n\n"
-            message += f"*Seller:* @{seller_username}\n"
-            message += f"*Price:* ${listing['price_usd']}\n"
-            message += f"*Members:* {listing['member_count']}\n"
-            message += f"*Category:* {listing['category']}\n\n"
+            message = f"📄 **Listing Details: {listing['group_title']}**\n\n"
+            message += f"**Description:**\n{listing['group_description']}\n\n"
+            message += f"**Seller:** @{listing['seller']['username'] or 'N/A'}\n"
+            message += f"**Price:** ${listing['price_usd']}\n"
+            message += f"**Members:** {listing['member_count']}\n"
+            message += f"**Category:** {listing['category']}\n\n"
             message += f"To purchase this group, use the button below."
 
             keyboard = [
@@ -527,7 +606,7 @@ Use the menu below to navigate the bot's features."""
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await update.message.reply_text(
-                message, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup
+                message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
             )
 
         except httpx.HTTPStatusError as e:
@@ -718,20 +797,19 @@ Happy trading! 🚀
         total_sales = await self._get_user_transaction_count(telegram_user, "seller")
         active_listings = await self._get_user_active_listings_count(telegram_user)
 
-        # Escape special characters for Markdown V2
-        first_name = escape_markdown(telegram_user.first_name or "", version=2)
-        last_name = escape_markdown(telegram_user.last_name or "", version=2)
-        username = escape_markdown(telegram_user.username or "Not set", version=2)
+        first_name = telegram_user.first_name or ""
+        last_name = telegram_user.last_name or ""
+        username = telegram_user.username or "Not set"
 
-        profile_text = f"""👤 *Your Profile*
+        profile_text = f"""👤 **Your Profile**
 
-*Basic Information:*
+**Basic Information:**
 • Name: {first_name} {last_name}
 • Username: @{username}
 • Status: {"✅ Verified" if telegram_user.is_verified else "❌ Not verified"}
 • Member Since: {telegram_user.created_at.strftime("%B %Y")}
 
-*Trading Statistics:*
+**Trading Statistics:**
 • Total Purchases: {total_purchases}
 • Total Sales: {total_sales}
 • Active Listings: {active_listings}
@@ -752,13 +830,13 @@ Happy trading! 🚀
         if update.callback_query:
             await update.callback_query.edit_message_text(
                 profile_text,
-                parse_mode=ParseMode.MARKDOWN_V2,
+                parse_mode=ParseMode.MARKDOWN,
                 reply_markup=reply_markup,
             )
         elif update.message:
             await update.message.reply_text(
                 profile_text,
-                parse_mode=ParseMode.MARKDOWN_V2,
+                parse_mode=ParseMode.MARKDOWN,
                 reply_markup=reply_markup,
             )
 
@@ -780,12 +858,12 @@ Happy trading! 🚀
             )[:10]
         )
 
-        message = "*📊 Your Recent Transactions*\n\n"
+        message = "📊 **Your Recent Transactions**\n\n"
         if not transactions:
             message += "You have no recent transactions."
         else:
             for txn in transactions:
-                message += f"▪️ *{escape_markdown(txn.group_listing.group_title, version=2)}* \- ${txn.amount} {txn.currency} \- *Status:* {txn.status}\n"
+                message += f"• **{txn.group_listing.group_title}** - ${txn.amount} {txn.currency} - **Status:** {txn.status}\n"
 
         keyboard = [
             [InlineKeyboardButton("⬅️ Back to Profile", callback_data="profile")]
@@ -794,11 +872,11 @@ Happy trading! 🚀
 
         if update.callback_query:
             await update.callback_query.edit_message_text(
-                message, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup
+                message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
             )
         elif update.message:
             await update.message.reply_text(
-                message, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup
+                message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
             )
 
     async def my_listings_command(
@@ -819,12 +897,12 @@ Happy trading! 🚀
             ]
         )
 
-        message = "*🏪 Your Group Listings*\n\n"
+        message = "🏪 **Your Group Listings**\n\n"
         if not listings:
             message += "You have no active listings. Use `/list_group` to create one."
         else:
             for listing in listings:
-                message += f"▪️ *{escape_markdown(listing.group_title, version=2)}* \- ${listing.price_usd} \- *Status:* {listing.status}\n"
+                message += f"• **{listing.group_title}** - ${listing.price_usd} - **Status:** {listing.status}\n"
 
         keyboard = [
             [InlineKeyboardButton("⬅️ Back to Profile", callback_data="profile")]
@@ -833,11 +911,11 @@ Happy trading! 🚀
 
         if update.callback_query:
             await update.callback_query.edit_message_text(
-                message, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup
+                message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
             )
         elif update.message:
             await update.message.reply_text(
-                message, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup
+                message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
             )
 
     async def list_group_start(
@@ -1031,73 +1109,39 @@ Happy trading! 🚀
         price = context.user_data.get("listing_price", 0)
         group_username = context.user_data.get("listing_group_username", "")
 
-        # Escape special characters for Markdown
-        safe_title = escape_markdown(title, version=2)
-        safe_description = escape_markdown(description[:200], version=2)
-        safe_username = escape_markdown(group_username, version=2)
-        safe_category = escape_markdown(
-            category_names.get(category, category), version=2
-        )
+        confirmation_text = f"""📋 **Listing Confirmation**
 
-        try:
-            confirmation_text = f"""📋 *Listing Confirmation*
-
-*Group Details:*
-• Group: {safe_username}
-• Title: {safe_title}
-• Category: {safe_category}
+**Group Details:**
+• Group: {group_username}
+• Title: {title}
+• Category: {category_names.get(category, category)}
 • Price: ${price:.2f} USD
 
-*Description:*
-{safe_description}{"\\.\\.\\." if len(description) > 200 else ""}
+**Description:**
+{description[:200]}{"..." if len(description) > 200 else ""}
 
-*Important Notes:*
+**Important Notes:**
 • Group ownership has been verified ✅
 • 5% platform fee applies to successful sales
 • Listing expires after 30 days
 
 Ready to create this listing?"""
 
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        "✅ Create Listing", callback_data="confirm_listing"
-                    )
-                ],
-                [InlineKeyboardButton("❌ Cancel", callback_data="cancel_listing")],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "✅ Create Listing", callback_data="confirm_listing"
+                )
+            ],
+            [InlineKeyboardButton("❌ Cancel", callback_data="cancel_listing")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-            await query.edit_message_text(
-                confirmation_text,
-                parse_mode=ParseMode.MARKDOWN_V2,
-                reply_markup=reply_markup,
-            )
-        except Exception as e:
-            logger.error(f"Error in list_group_category: {e}")
-            # Fallback to plain text
-            simple_text = f"""📋 Listing Confirmation
-
-Group: {group_username}
-Title: {title}
-Category: {category_names.get(category, category)}
-Price: ${price:.2f} USD
-
-Description: {description[:200]}{"..." if len(description) > 200 else ""}
-
-Ready to create this listing?"""
-
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        "✅ Create Listing", callback_data="confirm_listing"
-                    )
-                ],
-                [InlineKeyboardButton("❌ Cancel", callback_data="cancel_listing")],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            await query.edit_message_text(simple_text, reply_markup=reply_markup)
+        await query.edit_message_text(
+            confirmation_text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup,
+        )
 
         return GROUP_LISTING_CONFIRM
 
@@ -1203,15 +1247,16 @@ Use `/my_listings` to manage your listings anytime!"""
         elif query.data == "profile":
             await self.profile_command(update, context)
         elif query.data == "browse_groups":
-            await query.edit_message_text("🏪 Group browsing feature coming soon!")
+            # Redirect to browse command
+            await self.browse_command(update, context)
         elif query.data == "list_group":
             await query.edit_message_text(
                 "Use /list_group command to create a new listing."
             )
         elif query.data == "my_listings":
-            await query.edit_message_text("📝 My listings feature coming soon!")
+            await self.my_listings_command(update, context)
         elif query.data == "transactions":
-            await query.edit_message_text("📊 Transaction history feature coming soon!")
+            await self.transactions_command(update, context)
 
     # ===== Transaction conversation handlers =====
     async def transaction_start(
@@ -1445,7 +1490,7 @@ Use `/my_listings` to manage your listings anytime!"""
 
 
 async def main_async(token: Optional[str] = None):
-    """Async main function to run the bot"""
+    """Async main function to run the bot (PTB v21.x)."""
     # Get bot token from argument or environment
     bot_token = token or settings.TELEGRAM_BOT_TOKEN
 
@@ -1457,19 +1502,16 @@ async def main_async(token: Optional[str] = None):
     logger.info("Initializing TrustlinkBot...")
     bot = TrustlinkBot(bot_token)
 
-    # Start polling using the recommended API for PTB v20+
+    # Start polling using PTB v21+ async API
     logger.info("Starting bot...")
     await bot.application.run_polling(drop_pending_updates=True)
 
 
 def main(token: Optional[str] = None):
-    """Synchronous wrapper for the async main function"""
+    """Synchronous wrapper for the async main function."""
     import asyncio
-
     asyncio.run(main_async(token))
 
 
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())
+    main()
