@@ -23,7 +23,7 @@ from django.utils import timezone
 
 from .models import EscrowTransaction, PaymentWebhook
 from .services import EscrowService
-from telegram_bot.notification_service import NotificationService
+from telegram_bot.notification_scheduler import NotificationScheduler
 
 # Set up logging for payment service
 logger = logging.getLogger('trustlink.payments')
@@ -283,12 +283,11 @@ class PaymentService:
                     webhook.processed = True
                     webhook.save()
                 
-                # Send notifications to buyer and seller
-                buyer_message = f"✅ Payment confirmed for transaction `{transaction.id}`. The seller has been notified to transfer ownership."
-                seller_message = f"💰 Payment received for transaction `{transaction.id}`. Please transfer ownership of the group to the buyer."
+                # Send notifications to buyer and seller using scheduler
+                NotificationScheduler.notify_payment_received(transaction)
                 
-                NotificationService.send_message(transaction.buyer.telegram_id, buyer_message)
-                NotificationService.send_message(transaction.seller.telegram_id, seller_message)
+                # Schedule transfer reminder for 48 hours later
+                NotificationScheduler.schedule_transfer_reminder(transaction, delay_hours=48)
                 
             return success
             
@@ -311,8 +310,13 @@ class PaymentService:
             # The user can try to pay again or the transaction will expire
             if transaction.status == 'PENDING':
                 # Send notification to buyer about payment failure
-                buyer_message = f"❌ Payment failed for transaction `{transaction.id}`. Please try again or contact support if the problem persists."
-                NotificationService.send_message(transaction.buyer.telegram_id, buyer_message)
+                NotificationScheduler.send_immediate_notification(
+                    telegram_user=transaction.buyer,
+                    title='❌ Payment Failed',
+                    message=f"Payment failed for transaction {transaction.id}. Please try again or contact support if the problem persists.",
+                    notification_type='SYSTEM_ALERT',
+                    transaction=transaction
+                )
             
             return True
             
@@ -332,8 +336,13 @@ class PaymentService:
             logger.info(f"Payment delayed for transaction {transaction.id}")
             
             # Send notification to buyer that payment is being processed
-            buyer_message = f"⏳ Your payment for transaction `{transaction.id}` is delayed. This can happen with some cryptocurrencies. We will notify you once it's confirmed."
-            NotificationService.send_message(transaction.buyer.telegram_id, buyer_message)
+            NotificationScheduler.send_immediate_notification(
+                telegram_user=transaction.buyer,
+                title='⏳ Payment Delayed',
+                message=f"Your payment for transaction {transaction.id} is delayed. This can happen with some cryptocurrencies. We will notify you once it's confirmed.",
+                notification_type='SYSTEM_ALERT',
+                transaction=transaction
+            )
             
             return True
             
@@ -353,8 +362,13 @@ class PaymentService:
             logger.info(f"Payment pending for transaction {transaction.id}")
             
             # Send notification to buyer that payment is detected
-            buyer_message = f"👀 Your payment for transaction `{transaction.id}` has been detected and is now pending confirmation."
-            NotificationService.send_message(transaction.buyer.telegram_id, buyer_message)
+            NotificationScheduler.send_immediate_notification(
+                telegram_user=transaction.buyer,
+                title='👀 Payment Detected',
+                message=f"Your payment for transaction {transaction.id} has been detected and is now pending confirmation.",
+                notification_type='SYSTEM_ALERT',
+                transaction=transaction
+            )
 
             return True
             

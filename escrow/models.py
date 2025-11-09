@@ -8,11 +8,11 @@ class TelegramUser(models.Model):
     """Extended user model for Telegram users"""
 
     user = models.OneToOneField(User, on_delete=models.CASCADE)
-    telegram_id = models.BigIntegerField(unique=True)
-    username = models.CharField(max_length=100, blank=True, null=True)
+    telegram_id = models.BigIntegerField(unique=True, db_index=True)
+    username = models.CharField(max_length=100, blank=True, null=True, db_index=True)
     first_name = models.CharField(max_length=100, blank=True, null=True)
     last_name = models.CharField(max_length=100, blank=True, null=True)
-    is_verified = models.BooleanField(default=False)
+    is_verified = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -72,6 +72,15 @@ class EscrowTransaction(models.Model):
 
     # Metadata
     notes = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['buyer', 'status']),
+            models.Index(fields=['seller', 'status']),
+            models.Index(fields=['payment_charge_id']),
+            models.Index(fields=['-created_at']),
+        ]
 
     def __str__(self):
         return f"Escrow {self.id} - {self.status}"
