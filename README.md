@@ -301,53 +301,6 @@ Deadline: 5 days remaining
 
 ---
 
-## 🛡️ Security Features
-
-### Multi-Layer Verification
-
-**1. Pre-Listing Verification**
-- ✅ Bot must be admin in group
-- ✅ Seller must be group creator
-- ✅ Group metadata snapshot taken
-- ✅ Admin list recorded
-
-**2. Pre-Payment Verification**
-- ✅ Group still exists
-- ✅ Seller still owns group
-- ✅ No suspicious admin changes
-- ✅ Member count verified
-
-**3. Post-Payment Verification**
-- ✅ Buyer added to group
-- ✅ Buyer promoted to admin
-- ✅ Creator rights transferred
-- ✅ Seller removed/demoted
-
-**4. Continuous Monitoring**
-- 🔍 Group state tracked
-- 🔍 Admin changes logged
-- 🔍 Suspicious activity detected
-- 🔍 Automatic alerts sent
-
-### Smart Contract Security
-
-**Immutable Code:**
-- Contract code cannot be changed after deployment
-- No backdoors or admin keys
-- Fully audited and open source
-
-**Time Locks:**
-- Automatic refund after deadline
-- Prevents indefinite fund locking
-- Protects both parties
-
-**Dispute Resolution:**
-- Built-in arbitration mechanism
-- Admin can resolve conflicts
-- Evidence submission system
-- Fair and transparent process
-
----
 
 ## 💼 Use Cases
 
@@ -380,31 +333,6 @@ Deadline: 5 days remaining
 - Transparent transaction history
 
 ---
-
-## 📊 Statistics & Analytics
-
-### Platform Metrics
-```
-Total Transactions:     1,247
-Total Volume:          $156,890
-Active Listings:           342
-Registered Users:        2,891
-Average Group Price:      $125
-Success Rate:           98.7%
-```
-
-### Your Dashboard
-```
-👤 Your Profile
-
-Purchases:              5 groups
-Sales:                  3 groups
-Active Listings:        2 groups
-Total Spent:           $450 TON
-Total Earned:          $320 TON
-Reputation:            ⭐⭐⭐⭐⭐ (4.9/5.0)
-Member Since:          January 2025
-```
 
 ---
 
@@ -505,63 +433,6 @@ Member Since:          January 2025
 
 ---
 
-## 🌐 Supported Features
-
-### ✅ Currently Available
-- [x] User registration and profiles
-- [x] Group listing creation
-- [x] Marketplace browsing
-- [x] TON blockchain payments
-- [x] Smart contract escrow
-- [x] Automated verification
-- [x] Dispute resolution
-- [x] Transaction history
-- [x] Real-time notifications
-- [x] Admin dashboard
-- [x] Group monitoring
-- [x] Audit logging
-
-### 🚧 Coming Soon
-- [ ] Seller reputation system
-- [ ] Advanced search filters
-- [ ] Group analytics
-- [ ] Bulk listing management
-- [ ] API for third-party integrations
-- [ ] Mobile app (iOS/Android)
-- [ ] Multi-language support
-- [ ] Referral program
-- [ ] Premium listings
-- [ ] Featured groups
-
----
-
-## 📈 Roadmap
-
-### Q1 2025
-- ✅ Launch MVP with TON integration
-- ✅ Basic escrow functionality
-- ✅ User registration and profiles
-- 🔄 Beta testing with 100 users
-
-### Q2 2025
-- 📅 Reputation system
-- 📅 Advanced analytics
-- 📅 Mobile app development
-- 📅 1,000+ active users
-
-### Q3 2025
-- 📅 API for developers
-- 📅 Multi-language support
-- 📅 Partnership with TON Foundation
-- 📅 10,000+ active users
-
-### Q4 2025
-- 📅 Premium features
-- 📅 Enterprise solutions
-- 📅 Global expansion
-- 📅 50,000+ active users
-
----
 
 ## 🤝 For Developers
 
@@ -612,41 +483,8 @@ resolve(transaction_id, decision)
 
 ---
 
-## 💡 Best Practices
 
-### For Sellers
 
-**✅ Do:**
-- Provide accurate group information
-- Respond quickly to purchase requests
-- Transfer ownership within 24 hours
-- Maintain good communication
-- Build your reputation
-
-**❌ Don't:**
-- List groups you don't own
-- Inflate member counts
-- Delay transfers unnecessarily
-- Ignore buyer messages
-- Create fake listings
-
-### For Buyers
-
-**✅ Do:**
-- Research the group before buying
-- Check seller reputation
-- Read group description carefully
-- Verify member count
-- Ask questions before purchase
-
-**❌ Don't:**
-- Rush into purchases
-- Ignore red flags
-- Skip verification steps
-- Dispute without valid reason
-- Share payment details publicly
-
----
 
 ## 🔐 Privacy & Data
 
@@ -672,26 +510,6 @@ resolve(transaction_id, decision)
 
 ---
 
-## 📞 Support & Community
-
-### Get Help
-- 💬 **Telegram Support**: @TrustlinkSupport
-- 📧 **Email**: support@trustlink.io
-- 📚 **Documentation**: docs.trustlink.io
-- 🐛 **Bug Reports**: github.com/trustlink/issues
-
-### Join Community
-- 🌐 **Official Channel**: @TrustlinkOfficial
-- 👥 **Community Group**: @TrustlinkCommunity
-- 🐦 **Twitter**: @TrustlinkBot
-- 💼 **LinkedIn**: Trustlink Platform
-
-### Response Times
-- Critical Issues: < 1 hour
-- General Support: < 24 hours
-- Feature Requests: < 7 days
-
----
 
 ## ⚖️ Legal & Compliance
 
@@ -716,34 +534,6 @@ irreversible. Use at your own risk.
 - Transparent operations
 - Regular audits
 - Community governed
-
----
-
-## 🎓 FAQ
-
-**Q: Is my money safe?**
-A: Yes! Funds are held in audited smart contracts on TON blockchain, not by us.
-
-**Q: What if the seller doesn't transfer the group?**
-A: Funds remain locked. You can open a dispute and get a refund.
-
-**Q: How long does a transaction take?**
-A: Average 7-10 minutes from payment to completion.
-
-**Q: What are the fees?**
-A: 5% platform fee + ~$0.01-0.05 TON gas fee.
-
-**Q: Can I cancel a transaction?**
-A: Before payment: Yes. After payment: Only through dispute resolution.
-
-**Q: Do I need a TON wallet?**
-A: Yes, you need a TON wallet to send/receive payments.
-
-**Q: Is this legal?**
-A: Yes! We're a non-custodial platform providing software, not financial services.
-
-**Q: What if I lose access to my Telegram account?**
-A: Contact support immediately. We can help recover your listings.
 
 ---
 
@@ -778,19 +568,13 @@ A: Contact support immediately. We can help recover your listings.
    └─ Browse or list groups
 ```
 
-### Quick Links
-- 🤖 **Bot**: [@TrustlinkBot](https://t.me/TrustlinkBot)
-- 📱 **Channel**: [@TrustlinkOfficial](https://t.me/TrustlinkOfficial)
-- 💬 **Support**: [@TrustlinkSupport](https://t.me/TrustlinkSupport)
-- 🌐 **Website**: [trustlink.io](https://trustlink.io)
 
----
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+##  Acknowledgments
 
 - TON Foundation for blockchain infrastructure
 - Telegram for the Bot API
