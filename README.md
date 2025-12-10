@@ -8,30 +8,30 @@
 
 ---
 
-## 🌟 What is Trustlink?
+##  What is Trustlink?
 
 Trustlink is a **trustless escrow platform** that enables safe buying and selling of Telegram groups using **TON cryptocurrency**. Built on TON blockchain smart contracts, Trustlink ensures that neither buyer nor seller can be scammed - funds are held securely in a smart contract until both parties fulfill their obligations.
 
-### 🎯 The Problem We Solve
+###  The Problem We Solve
 
 **Traditional group sales are risky:**
-- 💸 Sellers can take payment and not transfer ownership
-- 🚫 Buyers can receive the group and dispute the payment
-- ⚖️ No neutral third party to mediate
-- 🔓 No way to verify ownership transfer
+-  Sellers can take payment and not transfer ownership
+-  Buyers can receive the group and dispute the payment
+-  No neutral third party to mediate
+-  No way to verify ownership transfer
 
 **Trustlink's Solution:**
-- ✅ Smart contract holds funds (not us!)
-- ✅ Automated ownership verification
-- ✅ Transparent, on-chain transactions
-- ✅ Built-in dispute resolution
-- ✅ Zero custody - we never touch your money
+-  Smart contract holds funds (not us!)
+-  Automated ownership verification
+-  Transparent, on-chain transactions
+-  Built-in dispute resolution
+-  Zero custody - we never touch your money
 
 ---
 
-## ✨ Key Features
+##  Key Features
 
-### 🔐 Trustless Escrow System
+###  Trustless Escrow System
 - **Smart Contract Powered**: Funds locked in TON blockchain smart contracts
 - **Non-Custodial**: We never hold your cryptocurrency
 - **Automated Release**: Funds released automatically upon verification
@@ -43,19 +43,19 @@ Trustlink is a **trustless escrow platform** that enables safe buying and sellin
 - **Secure**: Battle-tested blockchain technology
 - **Transparent**: All transactions verifiable on-chain
 
-### 🤖 Intelligent Bot Interface
+###  Intelligent Bot Interface
 - **Never Leave Telegram**: Complete experience within Telegram
 - **Automated Verification**: Bot verifies group ownership automatically
 - **Real-time Notifications**: Instant updates on transaction status
 - **User-Friendly**: Simple commands and intuitive buttons
 
-### 📊 Comprehensive Marketplace
+###  Comprehensive Marketplace
 - **Browse Listings**: Search and filter available groups
 - **Detailed Information**: Member count, category, price, seller rating
 - **Secure Payments**: Pay with TON cryptocurrency
 - **Transaction History**: Track all your purchases and sales
 
-### 🛡️ Advanced Security
+###  Advanced Security
 - **Ownership Verification**: Automated checks before and after transfer
 - **Group Monitoring**: Continuous monitoring of listed groups
 - **Fraud Prevention**: Multiple verification layers
@@ -63,7 +63,7 @@ Trustlink is a **trustless escrow platform** that enables safe buying and sellin
 
 ---
 
-## 🚀 How It Works
+##  How It Works
 
 ### For Sellers
 
@@ -114,7 +114,7 @@ Trustlink is a **trustless escrow platform** that enables safe buying and sellin
 
 ---
 
-## 💰 Pricing & Fees
+##  Pricing & Fees
 
 ### Transaction Fees
 - **Platform Fee**: 5% of transaction value
@@ -133,7 +133,7 @@ Buyer Pays:         $100.02
 
 ---
 
-## 🎮 Bot Commands
+##  Bot Commands
 
 ### Essential Commands
 
@@ -158,7 +158,7 @@ Buyer Pays:         $100.02
 
 ---
 
-## 🔧 Technical Architecture
+##  Technical Architecture
 
 ### Technology Stack
 
@@ -245,11 +245,11 @@ Buyer Pays:         $100.02
 
 ---
 
-## 📱 User Interface
+##  User Interface
 
 ### Main Menu
 ```
-🎉 Welcome to Trustlink!
+ Welcome to Trustlink!
 
 ┌─────────────────────────────────┐
 │  🏪 Browse Listings             │
@@ -261,7 +261,7 @@ Buyer Pays:         $100.02
 
 ### Browse Listings
 ```
-🔥 Top Group Listings
+ Top Group Listings
 
 • Crypto Trading Signals
   👥 1,500 members
@@ -281,7 +281,7 @@ Buyer Pays:         $100.02
 
 ### Transaction Status
 ```
-📊 Transaction Status
+ Transaction Status
 
 Transaction ID: abc-123-def-456
 Status: ⏳ Awaiting Transfer
@@ -291,10 +291,10 @@ Amount: 150 TON ($450 USD)
 Seller: @cryptomaster
 
 Timeline:
-✅ Payment Received - 2 hours ago
-⏳ Awaiting Transfer - In progress
-⏸️ Verification - Pending
-⏸️ Funds Release - Pending
+ Payment Received - 2 hours ago
+ Awaiting Transfer - In progress
+ Verification - Pending
+ Funds Release - Pending
 
 Deadline: 5 days remaining
 ```
@@ -302,7 +302,7 @@ Deadline: 5 days remaining
 ---
 
 
-## 💼 Use Cases
+##  Use Cases
 
 ### 1. Community Builders
 **Scenario**: You've built a thriving community and want to move on
@@ -336,7 +336,7 @@ Deadline: 5 days remaining
 
 ---
 
-## 🔄 Transaction Lifecycle
+##  Transaction Lifecycle
 
 ### Complete Flow (7-10 minutes average)
 
@@ -390,7 +390,7 @@ Deadline: 5 days remaining
 
 ---
 
-## 🆘 Dispute Resolution
+##  Dispute Resolution
 
 ### When Disputes Happen
 
@@ -434,7 +434,7 @@ Deadline: 5 days remaining
 ---
 
 
-## 🤝 For Developers
+##  For Developers
 
 ### API Endpoints
 
@@ -486,7 +486,7 @@ resolve(transaction_id, decision)
 
 
 
-## 🔐 Privacy & Data
+##  Privacy & Data
 
 ### What We Collect
 - Telegram user ID and username
@@ -511,7 +511,7 @@ resolve(transaction_id, decision)
 ---
 
 
-## ⚖️ Legal & Compliance
+##  Legal & Compliance
 
 ### Terms of Service
 - Platform is non-custodial
@@ -537,7 +537,7 @@ irreversible. Use at your own risk.
 
 ---
 
-## 🏆 Why Choose Trustlink?
+##  Why Choose Trustlink?
 
 ### vs Traditional Methods
 
@@ -553,7 +553,7 @@ irreversible. Use at your own risk.
 
 ---
 
-## 🚀 Get Started Now!
+##  Get Started Now!
 
 ### 3 Simple Steps
 
@@ -585,7 +585,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**Built with ❤️ by the Trustlink Team**
+**Built with ❤️ by Yoseph Tesfaye**
 
 *Making Telegram group trading safe, fast, and transparent*
 
